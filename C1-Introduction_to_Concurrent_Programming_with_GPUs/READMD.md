@@ -1,3 +1,5 @@
+## Introduction to Concurrent Programming with GPUs
+
 ### M2: Core Principles of Parallel Programming on CPUs and GPUs
 
 1. concurrent programming pitfalls:
