@@ -2,8 +2,8 @@
 #include <thread>
 #include <deque>
 #include <mutex>
-#include <chrono>
 #include <condition_variable>
+#include <chrono>
 
 std::mutex mu, cout_mu;
 std::condition_variable cond;
@@ -18,20 +18,21 @@ public:
                   { return buffer_.size() < size_; });
         buffer_.push_back(num);
         locker.unlock();
-        cond.notify_all();
-        return;
+        cond.notify_one(); // Notify only one waiting consumer
     }
+
     int remove()
     {
         std::unique_lock<std::mutex> locker(mu);
         cond.wait(locker, [this]()
-                  { return buffer_.size() > 0; });
+                  { return !buffer_.empty(); }); // Slightly better check
         int back = buffer_.back();
         buffer_.pop_back();
         locker.unlock();
-        cond.notify_all();
+        cond.notify_one(); // Notify only one waiting producer
         return back;
     }
+
     Buffer() {}
 
 private:
@@ -42,22 +43,21 @@ private:
 class Producer
 {
 public:
-    Producer(Buffer *buffer, std::string name)
-    {
-        this->buffer_ = buffer;
-        this->name_ = name;
-    }
+    Producer(Buffer *buffer, std::string name) : buffer_(buffer), name_(name) {}
+
     void run()
     {
         while (true)
         {
             int num = std::rand() % 100;
             buffer_->add(num);
-            cout_mu.lock();
+
             int sleep_time = std::rand() % 100;
-            std::cout << "Name: " << name_ << "   Produced: " << num << "   Sleep time: " << sleep_time << std::endl;
+            {
+                std::lock_guard<std::mutex> lock(cout_mu);
+                std::cout << "Name: " << name_ << "   Produced: " << num << "   Sleep time: " << sleep_time << "ms" << std::endl;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
-            cout_mu.unlock();
         }
     }
 
@@ -69,21 +69,20 @@ private:
 class Consumer
 {
 public:
-    Consumer(Buffer *buffer, std::string name)
-    {
-        this->buffer_ = buffer;
-        this->name_ = name;
-    }
+    Consumer(Buffer *buffer, std::string name) : buffer_(buffer), name_(name) {}
+
     void run()
     {
         while (true)
         {
             int num = buffer_->remove();
-            cout_mu.lock();
-            int sleep_time = rand() % 100;
-            std::cout << "Name: " << name_ << "   Consumed: " << num << "   Sleep time: " << sleep_time << std::endl;
+
+            int sleep_time = std::rand() % 100;
+            {
+                std::lock_guard<std::mutex> lock(cout_mu);
+                std::cout << "Name: " << name_ << "   Consumed: " << num << "   Sleep time: " << sleep_time << "ms" << std::endl;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
-            cout_mu.unlock();
         }
     }
 
@@ -110,13 +109,9 @@ int main()
     std::thread consumer_thread2(&Consumer::run, &c2);
     std::thread consumer_thread3(&Consumer::run, &c3);
 
-    producer_thread1.join();
-    producer_thread2.join();
-    producer_thread3.join();
-    consumer_thread1.join();
-    consumer_thread2.join();
-    consumer_thread3.join();
+    // Let threads run for some time
+    std::this_thread::sleep_for(std::chrono::seconds(5));
 
-    getchar();
+    // No `join()` because the threads run indefinitely
     return 0;
 }
