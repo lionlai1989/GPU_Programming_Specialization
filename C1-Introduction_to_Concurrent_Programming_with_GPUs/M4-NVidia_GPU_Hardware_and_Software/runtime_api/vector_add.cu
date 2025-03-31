@@ -42,8 +42,7 @@ vectorAdd(const float *A, const float *B, float *C, int numElements)
 /**
  * Host main routine
  */
-int
-main(void)
+int main(void)
 {
     // Error code to check return values for CUDA calls
     cudaError_t err = cudaSuccess;
@@ -72,8 +71,8 @@ main(void)
     // Initialize the host input vectors
     for (int i = 0; i < numElements; ++i)
     {
-        h_A[i] = rand()/(float)RAND_MAX;
-        h_B[i] = rand()/(float)RAND_MAX;
+        h_A[i] = rand() / (float)RAND_MAX;
+        h_B[i] = rand() / (float)RAND_MAX;
     }
 
     // Allocate the device input vector A
@@ -127,7 +126,7 @@ main(void)
 
     // Launch the Vector Add CUDA Kernel
     int threadsPerBlock = 256;
-    int blocksPerGrid =(numElements + threadsPerBlock - 1) / threadsPerBlock;
+    int blocksPerGrid = (numElements + threadsPerBlock - 1) / threadsPerBlock;
     printf("CUDA kernel launch with %d blocks of %d threads\n", blocksPerGrid, threadsPerBlock);
     vectorAdd<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C, numElements);
     err = cudaGetLastError();

@@ -15,29 +15,31 @@
 
 // This will output the proper CUDA error strings
 // in the event that a CUDA host call returns an error
-#define checkCudaErrors(err)  __checkCudaErrors (err, __FILE__, __LINE__)
+#define checkCudaErrors(err) __checkCudaErrors(err, __FILE__, __LINE__)
 
-inline void __checkCudaErrors( CUresult err, const char *file, const int line )
+inline void __checkCudaErrors(CUresult err, const char *file, const int line)
 {
-    if( CUDA_SUCCESS != err) {
+    if (CUDA_SUCCESS != err)
+    {
         fprintf(stderr,
                 "CUDA Driver API error = %04d from file <%s>, line %i.\n",
-                err, file, line );
+                err, file, line);
         exit(-1);
     }
 }
 
 // --- global variables ----------------------------------------------------
-CUdevice   device;
-CUcontext  context;
-CUmodule   module;
+CUdevice device;
+CUcontext context;
+CUmodule module;
 CUfunction function;
-size_t     totalGlobalMem;
+size_t totalGlobalMem;
 
-// char       *module_file = (char*) "matSumKernel.fatbin";
-char       *module_file = (char*) "matSumKernel.ptx";
-char       *kernel_name = (char*) "matSum";
+// NOTE: fatbin or ptx
+char *module_file = (char *)"matSumKernel.fatbin";
+// char *module_file = (char *)"matSumKernel.ptx";
 
+char *kernel_name = (char *)"matSum";
 
 // --- functions -----------------------------------------------------------
 void initCUDA()
@@ -49,7 +51,8 @@ void initCUDA()
     if (err == CUDA_SUCCESS)
         checkCudaErrors(cuDeviceGetCount(&deviceCount));
 
-    if (deviceCount == 0) {
+    if (deviceCount == 0)
+    {
         fprintf(stderr, "Error: no devices supporting CUDA\n");
         exit(-1);
     }
@@ -61,25 +64,26 @@ void initCUDA()
     printf("> Using device 0: %s\n", name);
 
     // get compute capabilities and the devicename
-    checkCudaErrors( cuDeviceComputeCapability(&major, &minor, device) );
+    checkCudaErrors(cuDeviceComputeCapability(&major, &minor, device));
     printf("> GPU Device has SM %d.%d compute capability\n", major, minor);
 
-    checkCudaErrors( cuDeviceTotalMem(&totalGlobalMem, device) );
+    checkCudaErrors(cuDeviceTotalMem(&totalGlobalMem, device));
     printf("  Total amount of global memory:   %llu bytes\n",
            (unsigned long long)totalGlobalMem);
     printf("  64-bit Memory Address:           %s\n",
-           (totalGlobalMem > (unsigned long long)4*1024*1024*1024L)?
-           "YES" : "NO");
+           (totalGlobalMem > (unsigned long long)4 * 1024 * 1024 * 1024L) ? "YES" : "NO");
 
     err = cuCtxCreate(&context, 0, device);
-    if (err != CUDA_SUCCESS) {
+    if (err != CUDA_SUCCESS)
+    {
         fprintf(stderr, "* Error initializing the CUDA context.\n");
         cuCtxDetach(context);
         exit(-1);
     }
 
     err = cuModuleLoad(&module, module_file);
-    if (err != CUDA_SUCCESS) {
+    if (err != CUDA_SUCCESS)
+    {
         fprintf(stderr, "* Error loading the module %s\n", module_file);
         cuCtxDetach(context);
         exit(-1);
@@ -87,7 +91,8 @@ void initCUDA()
 
     err = cuModuleGetFunction(&function, module, kernel_name);
 
-    if (err != CUDA_SUCCESS) {
+    if (err != CUDA_SUCCESS)
+    {
         fprintf(stderr, "* Error getting kernel function %s\n", kernel_name);
         cuCtxDetach(context);
         exit(-1);
@@ -101,26 +106,26 @@ void finalizeCUDA()
 
 void setupDeviceMemory(CUdeviceptr *d_a, CUdeviceptr *d_b, CUdeviceptr *d_c)
 {
-    checkCudaErrors( cuMemAlloc(d_a, sizeof(int) * N) );
-    checkCudaErrors( cuMemAlloc(d_b, sizeof(int) * N) );
-    checkCudaErrors( cuMemAlloc(d_c, sizeof(int) * N) );
+    checkCudaErrors(cuMemAlloc(d_a, sizeof(int) * N));
+    checkCudaErrors(cuMemAlloc(d_b, sizeof(int) * N));
+    checkCudaErrors(cuMemAlloc(d_c, sizeof(int) * N));
 }
 
 void releaseDeviceMemory(CUdeviceptr d_a, CUdeviceptr d_b, CUdeviceptr d_c)
 {
-    checkCudaErrors( cuMemFree(d_a) );
-    checkCudaErrors( cuMemFree(d_b) );
-    checkCudaErrors( cuMemFree(d_c) );
+    checkCudaErrors(cuMemFree(d_a));
+    checkCudaErrors(cuMemFree(d_b));
+    checkCudaErrors(cuMemFree(d_c));
 }
 
 void runKernel(CUdeviceptr d_a, CUdeviceptr d_b, CUdeviceptr d_c)
 {
-    void *args[3] = { &d_a, &d_b, &d_c };
+    void *args[3] = {&d_a, &d_b, &d_c};
 
     // grid for kernel: <<<N, 1>>>
-    checkCudaErrors( cuLaunchKernel(function, N, 1, 1,  // Nx1x1 blocks
-                                    1, 1, 1,            // 1x1x1 threads
-                                    0, 0, args, 0) );
+    checkCudaErrors(cuLaunchKernel(function, N, 1, 1, // Nx1x1 blocks
+                                   1, 1, 1,           // 1x1x1 threads
+                                   0, 0, args, 0));
 }
 
 int main(int argc, char **argv)
@@ -129,7 +134,8 @@ int main(int argc, char **argv)
     CUdeviceptr d_a, d_b, d_c;
 
     // initialize host arrays
-    for (int i = 0; i < N; ++i) {
+    for (int i = 0; i < N; ++i)
+    {
         a[i] = N - i;
         b[i] = i * i;
     }
@@ -142,8 +148,8 @@ int main(int argc, char **argv)
     setupDeviceMemory(&d_a, &d_b, &d_c);
 
     // copy arrays to device
-    checkCudaErrors( cuMemcpyHtoD(d_a, a, sizeof(int) * N) );
-    checkCudaErrors( cuMemcpyHtoD(d_b, b, sizeof(int) * N) );
+    checkCudaErrors(cuMemcpyHtoD(d_a, a, sizeof(int) * N));
+    checkCudaErrors(cuMemcpyHtoD(d_b, b, sizeof(int) * N));
 
     // run
     printf("# Running the kernel...\n");
@@ -151,14 +157,14 @@ int main(int argc, char **argv)
     printf("# Kernel complete.\n");
 
     // copy results to host and report
-    checkCudaErrors( cuMemcpyDtoH(c, d_c, sizeof(int) * N) );
-    for (int i = 0; i < N; ++i) {
+    checkCudaErrors(cuMemcpyDtoH(c, d_c, sizeof(int) * N));
+    for (int i = 0; i < N; ++i)
+    {
         if (c[i] != a[i] + b[i])
             printf("* Error at array position %d: Expected %d, Got %d\n",
-                   i, a[i]+b[i], c[i]);
+                   i, a[i] + b[i], c[i]);
     }
     printf("*** All checks complete.\n");
-
 
     // finish
     printf("- Finalizing...\n");

@@ -1,5 +1,5 @@
 IDIR=./
-COMPILER=REPLACE_WITH_NVIDIA_CROSS_COMPILER
+COMPILER=nvcc
 COMPILER_FLAGS=-I$(IDIR) -I/usr/local/cuda/include -lcuda --std c++17
 
 .PHONY: clean build run

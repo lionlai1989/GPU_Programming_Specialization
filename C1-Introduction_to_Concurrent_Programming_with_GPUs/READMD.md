@@ -72,3 +72,7 @@ explain what are the following three. differences and commons.
 - [CMU's An Introduction to Parallel Computing in C++](https://www.cs.cmu.edu/afs/cs/academic/class/15210-f18/www/pasl.html)
 
 - [CUDA Books archive](https://developer.nvidia.com/cuda-books-archive)
+
+- [CUDA C++ Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
+
+- [CUDA C++ Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)
