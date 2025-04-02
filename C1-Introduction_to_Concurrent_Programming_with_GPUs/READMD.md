@@ -59,6 +59,9 @@ explain what are the following three. differences and commons.
 ### M5: Introduction to GPU Programming
 
 1. understand cuda keywords
+__host__
+__global__
+__device__
 2. 
 
 ### References:
