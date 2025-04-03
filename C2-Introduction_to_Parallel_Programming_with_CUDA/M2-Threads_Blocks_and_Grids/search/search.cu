@@ -24,7 +24,8 @@ __global__ void search(int *d_d, int *d_i, int numElements)
         int inputVal = d_d[i];
         if (inputVal == d_v)
         {
-            d_i[0] = i;
+            // d_i[0] = i;
+            atomicCAS(&d_i[0], -1, i);
         }
     }
 }
@@ -88,7 +89,8 @@ __host__ std::tuple<int *, int> readCsv(std::string filename)
     // Close file
     myFile.close();
     int numElements = tempResult.size();
-    int result[numElements];
+    // int result[numElements];
+    int *result = new int[numElements];
     // Copy all elements of vector to array
     std::copy(tempResult.begin(), tempResult.end(), result);
 
@@ -308,17 +310,17 @@ __host__ std::tuple<int *, int, int> setUpSearchInput(std::string inputFilename,
  */
 int main(int argc, char *argv[])
 {
-    int h_i = -1;
-    int *h_d;
+    int h_i = -1; // host input
+    int *h_d;     // host data
 
     auto [numElements, h_v, currentPartId, threadsPerBlock, inputFilename, sortInputData] = parseCommandLineArguments(argc, argv);
     std::tuple<int *, int, int> searchInputTuple = setUpSearchInput(inputFilename, numElements, h_v, sortInputData);
 
     h_d = get<0>(searchInputTuple);
     numElements = get<1>(searchInputTuple);
-    h_v = get<2>(searchInputTuple);
+    h_v = get<2>(searchInputTuple); // search value
 
-    auto [d_d, d_i] = allocateDeviceMemory(numElements);
+    auto [d_d, d_i] = allocateDeviceMemory(numElements); // d_d: device_data, d_i: device_input
     copyFromHostToDevice(h_v, h_d, h_i, d_d, d_i, numElements);
 
     executeKernel(d_d, d_i, numElements, threadsPerBlock);

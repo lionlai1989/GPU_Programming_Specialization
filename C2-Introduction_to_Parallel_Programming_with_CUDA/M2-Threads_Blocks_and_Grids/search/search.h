@@ -12,7 +12,7 @@ using namespace std;
 
 // For the CUDA runtime routines (prefixed with "cuda_")
 
-__constant__ int d_v;
+__constant__ int d_v; // device search value
 
 __global__ void search(int *d_d, int *d_i, int numElements);
 __host__ int *allocateRandomHostMemory(int numElements);
