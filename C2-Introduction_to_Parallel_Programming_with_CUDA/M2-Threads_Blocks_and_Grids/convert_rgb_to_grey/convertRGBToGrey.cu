@@ -14,10 +14,19 @@
  * CUDA Kernel Device code
  *
  */
-__global__ void convert(uchar *d_r, uchar *d_g, uchar *d_b, uchar *d_gray)
+__global__ void convert(uchar *d_r, uchar *d_g, uchar *d_b, uchar *d_gray, int num_pixels)
 {
-    //To convert from RGB to grayscale, use the average of the values in d_r, d_g, d_b and place in d_gray
+    // To convert from RGB to grayscale, use the average of the values in d_r, d_g, d_b and place in d_gray
+    // int blockId = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    // int threadId = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    // int idx = blockId * (blockDim.x * blockDim.y * blockDim.z) + threadId;
 
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < num_pixels)
+    {
+        d_gray[idx] = (d_r[idx] + d_g[idx] + d_b[idx]) / 3;
+    }
 }
 
 __host__ float compareGrayImages(uchar *gray, uchar *test_gray, int rows, int columns)
@@ -26,12 +35,12 @@ __host__ float compareGrayImages(uchar *gray, uchar *test_gray, int rows, int co
     int numImagePixels = rows * columns;
     int imagePixelDifference = 0.0;
 
-    for(int r = 0; r < rows; ++r)
+    for (int r = 0; r < rows; ++r)
     {
-        for(int c = 0; c < columns; ++c)
+        for (int c = 0; c < columns; ++c)
         {
-            uchar image0Pixel = gray[r*rows+c];
-            uchar image1Pixel = test_gray[r*rows+c];
+            uchar image0Pixel = gray[r * columns + c];
+            uchar image1Pixel = test_gray[r * columns + c];
             imagePixelDifference += abs(image0Pixel - image1Pixel);
         }
     }
@@ -84,13 +93,12 @@ __host__ std::tuple<uchar *, uchar *, uchar *, uchar *> allocateDeviceMemory(int
         exit(EXIT_FAILURE);
     }
 
-    //Allocate device constant symbols for rows and columns
+    // Allocate device constant symbols for rows and columns
     cudaMemcpyToSymbol(d_rows, &rows, sizeof(int), 0, cudaMemcpyHostToDevice);
     cudaMemcpyToSymbol(d_columns, &columns, sizeof(int), 0, cudaMemcpyHostToDevice);
 
     return {d_r, d_g, d_b, d_gray};
 }
-
 
 __host__ void copyFromHostToDevice(uchar *h_r, uchar *d_r, uchar *h_g, uchar *d_g, uchar *h_b, uchar *d_b, int rows, int columns)
 {
@@ -124,13 +132,18 @@ __host__ void copyFromHostToDevice(uchar *h_r, uchar *d_r, uchar *h_g, uchar *d_
 __host__ void executeKernel(uchar *d_r, uchar *d_g, uchar *d_b, uchar *d_gray, int rows, int columns, int threadsPerBlock)
 {
     cout << "Executing kernel\n";
-    //Launch the convert CUDA Kernel
-    int blockZSize = 4; // Could consider making the block/grid and memory layout 3d mapped but for now just breaking up computation
-    int gridCols = min(columns/(threadsPerBlock*4),1);
-    dim3 grid(rows, gridCols, 1);
-    dim3 block(1, threadsPerBlock, blockZSize);
+    // Launch the convert CUDA Kernel
+    // int blockZSize = 4; // Could consider making the block/grid and memory layout 3d mapped but for now just breaking up computation
+    // int gridCols = min(columns / (threadsPerBlock * 4), 1);
+    // dim3 grid(rows, gridCols, 1);
+    // dim3 block(1, threadsPerBlock, blockZSize);
+    int num_pixels = rows * columns;
+    int blocksPerGrid = (num_pixels + threadsPerBlock - 1) / threadsPerBlock;
+    dim3 grid(blocksPerGrid);
+    dim3 block(threadsPerBlock);
+    convert<<<grid, block>>>(d_r, d_g, d_b, d_gray, num_pixels);
 
-    convert<<<grid, block>>>(d_r, d_g, d_b, d_gray);
+    convert<<<grid, block>>>(d_r, d_g, d_b, d_gray, rows * columns);
     cudaError_t err = cudaGetLastError();
 
     if (err != cudaSuccess)
@@ -244,7 +257,7 @@ __host__ std::tuple<int, int, uchar *, uchar *, uchar *> readImageFromFile(std::
 {
     cout << "Reading Image From File\n";
     Mat img = imread(inputFile, IMREAD_COLOR);
-    
+
     const int rows = img.rows;
     const int columns = img.cols;
     const int channels = img.channels();
@@ -254,18 +267,18 @@ __host__ std::tuple<int, int, uchar *, uchar *, uchar *> readImageFromFile(std::
     uchar *h_r = (uchar *)malloc(sizeof(uchar) * rows * columns);
     uchar *h_g = (uchar *)malloc(sizeof(uchar) * rows * columns);
     uchar *h_b = (uchar *)malloc(sizeof(uchar) * rows * columns);
-    
-    for(int r = 0; r < rows; ++r)
+
+    for (int r = 0; r < rows; ++r)
     {
-        for(int c = 0; c < columns; ++c)
+        for (int c = 0; c < columns; ++c)
         {
             Vec3b intensity = img.at<Vec3b>(r, c);
             uchar blue = intensity.val[0];
             uchar green = intensity.val[1];
             uchar red = intensity.val[2];
-            h_r[r*rows+c] = red;
-            h_g[r*rows+c] = green;
-            h_b[r*rows+c] = blue;
+            h_r[r * columns + c] = red;
+            h_g[r * columns + c] = green;
+            h_b[r * columns + c] = blue;
         }
     }
 
@@ -281,11 +294,11 @@ __host__ uchar *cpuConvertToGray(std::string inputFile)
 
     uchar *gray = (uchar *)malloc(sizeof(uchar) * rows * columns);
 
-    for(int r = 0; r < rows; ++r)
+    for (int r = 0; r < rows; ++r)
     {
-        for(int c = 0; c < columns; ++c)
+        for (int c = 0; c < columns; ++c)
         {
-            gray[r*rows+c] = min(grayImage.at<uchar>(r, c), 254);
+            gray[r * columns + c] = min(grayImage.at<uchar>(r, c), 254);
         }
     }
 
@@ -299,9 +312,9 @@ int main(int argc, char *argv[])
     std::string outputImage = get<1>(parsedCommandLineArgsTuple);
     std::string currentPartId = get<2>(parsedCommandLineArgsTuple);
     int threadsPerBlock = get<3>(parsedCommandLineArgsTuple);
-    try 
+    try
     {
-        auto[rows, columns, h_r, h_g, h_b] = readImageFromFile(inputImage);
+        auto [rows, columns, h_r, h_g, h_b] = readImageFromFile(inputImage);
         uchar *gray = (uchar *)malloc(sizeof(uchar) * rows * columns);
         std::tuple<uchar *, uchar *, uchar *, uchar *> memoryTuple = allocateDeviceMemory(rows, columns);
         uchar *d_r = get<0>(memoryTuple);
@@ -322,20 +335,20 @@ int main(int argc, char *argv[])
         compression_params.push_back(IMWRITE_PNG_COMPRESSION);
         compression_params.push_back(9);
 
-        //cout << "Output gray intensities: ";
-        for(int r = 0; r < rows; ++r)
+        // cout << "Output gray intensities: ";
+        for (int r = 0; r < rows; ++r)
         {
-            for(int c = 0; c < columns; ++c)
+            for (int c = 0; c < columns; ++c)
             {
-                grayImageMat.at<uchar>(r,c) = gray[r*rows+c];
+                grayImageMat.at<uchar>(r, c) = gray[r * columns + c];
             }
         }
-        //cout << "\n";
+        // cout << "\n";
 
         imwrite(outputImage, grayImageMat, compression_params);
 
         uchar *test_gray = cpuConvertToGray(inputImage);
-        
+
         float scaledMeanDifferencePercentage = compareGrayImages(gray, test_gray, rows, columns) * 100;
         cout << "Mean difference percentage: " << scaledMeanDifferencePercentage << "\n";
     }
