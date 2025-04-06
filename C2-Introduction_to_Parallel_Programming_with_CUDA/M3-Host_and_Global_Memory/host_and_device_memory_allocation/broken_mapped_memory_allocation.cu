@@ -36,8 +36,8 @@ __host__ std::tuple<float *, float *> allocateRandomHostMemory(int numElements)
     for (int i = 0; i < numElements; ++i)
     {
         // Based on float random number generation code at https://stackoverflow.com/questions/686353/random-float-number-generation
-        h_a[i] = LO_RAND + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(HI_RAND-LO_RAND)));
-        h_b[i] = LO_RAND + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(HI_RAND-LO_RAND)));
+        h_a[i] = LO_RAND + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (HI_RAND - LO_RAND)));
+        h_b[i] = LO_RAND + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (HI_RAND - LO_RAND)));
     }
 
     return {h_a, h_b};
@@ -45,14 +45,15 @@ __host__ std::tuple<float *, float *> allocateRandomHostMemory(int numElements)
 
 // Based heavily on https://www.gormanalysis.com/blog/reading-and-writing-csv-files-with-cpp/
 // Presumes that there is no header in the csv file
-__host__ std::tuple<float *, float *, int>readCsv(std::string filename)
+__host__ std::tuple<float *, float *, int> readCsv(std::string filename)
 {
     vector<int> tempResult;
     // Create an input filestream
     ifstream myFile(filename);
 
     // Make sure the file is open
-    if(!myFile.is_open()) throw runtime_error("Could not open file");
+    if (!myFile.is_open())
+        throw runtime_error("Could not open file");
 
     // Helper vars
     string line, colname;
@@ -62,17 +63,18 @@ __host__ std::tuple<float *, float *, int>readCsv(std::string filename)
     getline(myFile, line);
     // Create a stringstream of the current line
     stringstream ss0(line);
-    
+
     // Extract each integer
-    while(ss0 >> val){
+    while (ss0 >> val)
+    {
         tempResult.push_back(val);
         // If the next token is a comma, ignore it and move on
-        if(ss0.peek() == ',') ss0.ignore();
+        if (ss0.peek() == ',')
+            ss0.ignore();
     }
 
     int numElements = tempResult.size();
     size_t size = numElements * sizeof(float);
-    
 
     // It is required that mapped memory is used for h_a and h_b
     float *h_a;
@@ -86,14 +88,16 @@ __host__ std::tuple<float *, float *, int>readCsv(std::string filename)
     getline(myFile, line);
     // Create a stringstream of the current line
     stringstream ss1(line);
-    
+
     // Extract each integer
-    while(ss1 >> val){
+    while (ss1 >> val)
+    {
         tempResult.push_back(val);
         // If the next token is a comma, ignore it and move on
-        if(ss1.peek() == ',') ss1.ignore();
+        if (ss1.peek() == ',')
+            ss1.ignore();
     }
-    
+
     // It is required that mapped memory is used for h_a and h_b
     float *h_b;
     cudaHostMalloc((float **)&h_b, size, cudaHostAllocMapped);
@@ -153,7 +157,7 @@ __host__ void copyFromHostToDevice(float *h_a, float *h_b, float *d_a, float *d_
 __host__ void executeKernel(float *d_a, float *d_b, float *h_c, int numElements, int threadsPerBlock)
 {
     // Launch the search CUDA Kernel
-    int blocksPerGrid =(numElements + threadsPerBlock - 1) + threadsPerBlock;
+    int blocksPerGrid = (numElements + threadsPerBlock - 1) + threadsPerBlock;
     add<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, h_c, numElements);
 
     cudaError_t err = cudaGetLastError();
@@ -181,7 +185,6 @@ __host__ void deallocateMemory(float *d_a, float *d_b)
         fprintf(stderr, "Failed to free device vector d_b (error code %s)!\n", cudaGetErrorString(err));
         exit(EXIT_FAILURE);
     }
-
 }
 
 // Reset the device and exit
@@ -204,11 +207,11 @@ __host__ void cleanUpDevice()
 // Note that this function should not be modified
 __host__ void outputToFile(std::string currentPartId, float *h_a, float *h_b, float *h_c, int numElements)
 {
-	string outputFileName = "output-" + currentPartId + ".txt";
-	// NOTE: Do not remove this output to file statement as it is used to grade assignment,
-	// so it should be called by each thread
-	ofstream outputFile;
-	outputFile.open (outputFileName, ofstream::app);
+    string outputFileName = "output-" + currentPartId + ".txt";
+    // NOTE: Do not remove this output to file statement as it is used to grade assignment,
+    // so it should be called by each thread
+    ofstream outputFile;
+    outputFile.open(outputFileName, ofstream::app);
 
     outputFile << "PartID: " << currentPartId;
     outputFile << "Input A: ";
@@ -224,7 +227,7 @@ __host__ void outputToFile(std::string currentPartId, float *h_a, float *h_b, fl
         outputFile << h_c[i] << " ";
     outputFile << "\n";
 
-	outputFile.close();
+    outputFile.close();
 }
 
 // Note that this function should not be modified
@@ -236,28 +239,28 @@ __host__ std::tuple<int, std::string, int, std::string, std::string> parseComman
     std::string mathematicalOperation = "add";
     std::string inputFilename = "NULL";
 
-    for(int i = 1; i < argc; i++)
+    for (int i = 1; i < argc; i++)
     {
         std::string option(argv[i]);
         i++;
         std::string value(argv[i]);
-        if(option.compare("-t") == 0) 
+        if (option.compare("-t") == 0)
         {
             threadsPerBlock = atoi(value.c_str());
         }
-        else if(option.compare("-n") == 0) 
+        else if (option.compare("-n") == 0)
         {
             numElements = atoi(value.c_str());
         }
-        else if(option.compare("-f") == 0) 
+        else if (option.compare("-f") == 0)
         {
             inputFilename = value;
         }
-        else if(option.compare("-p") == 0) 
+        else if (option.compare("-p") == 0)
         {
             currentPartId = value;
         }
-        else if(option.compare("-o") == 0) 
+        else if (option.compare("-o") == 0)
         {
             mathematicalOperation = value;
         }
@@ -272,16 +275,16 @@ __host__ std::tuple<float *, float *, int> setUpInput(std::string inputFilename,
     float *h_a;
     float *h_b;
 
-    if(inputFilename.compare("NULL") != 0)
+    if (inputFilename.compare("NULL") != 0)
     {
-        tuple<float *, float*, int>csvData = readCsv(inputFilename);
+        tuple<float *, float *, int> csvData = readCsv(inputFilename);
         h_a = get<0>(csvData);
         h_b = get<1>(csvData);
         numElements = get<2>(csvData);
     }
-    else 
+    else
     {
-        tuple<float *, float*> randomData = allocateRandomHostMemory(numElements);
+        tuple<float *, float *> randomData = allocateRandomHostMemory(numElements);
         h_a = get<0>(randomData);
         h_b = get<1>(randomData);
     }
@@ -300,8 +303,8 @@ __host__ std::tuple<float *, float *, int> setUpInput(std::string inputFilename,
  */
 int main(int argc, char *argv[])
 {
-    auto[numElements, currentPartId, threadsPerBlock, inputFilename, mathematicalOperation] = parseCommandLineArguments(argc, argv);
-    tuple<float *, float*, int> searchInputTuple = setUpInput(inputFilename, numElements);
+    auto [numElements, currentPartId, threadsPerBlock, inputFilename, mathematicalOperation] = parseCommandLineArguments(argc, argv);
+    tuple<float *, float *, int> searchInputTuple = setUpInput(inputFilename, numElements);
     float *h_a;
     float *h_b;
 
@@ -310,9 +313,9 @@ int main(int argc, char *argv[])
     numElements = get<2>(searchInputTuple);
 
     float *h_c;
-    cudaMallocManaged((float **)&h_c, numElements*sizeof(float));
+    cudaMallocManaged((float **)&h_c, numElements * sizeof(float));
 
-    auto[d_a, d_b] = allocateDeviceMemory(numElements);
+    auto [d_a, d_b] = allocateDeviceMemory(numElements);
     copyFromHostToDevice(h_a, h_b, d_a, d_b, numElements);
 
     executeKernel(d_a, d_b, h_c, numElements, threadsPerBlock);

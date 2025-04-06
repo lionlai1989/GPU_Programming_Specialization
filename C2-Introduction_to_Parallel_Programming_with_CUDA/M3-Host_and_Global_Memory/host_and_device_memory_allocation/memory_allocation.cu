@@ -20,7 +20,7 @@ __global__ void add(int *d_a, int *d_b, int *h_c, int numElements)
     }
 }
 
-__global__ void sub(int *d_a, int *d_b, int  *h_c, int numElements)
+__global__ void sub(int *d_a, int *d_b, int *h_c, int numElements)
 {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -30,7 +30,7 @@ __global__ void sub(int *d_a, int *d_b, int  *h_c, int numElements)
     }
 }
 
-__global__ void mult(int *d_a, int *d_b, int  *h_c, int numElements)
+__global__ void mult(int *d_a, int *d_b, int *h_c, int numElements)
 {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -40,7 +40,7 @@ __global__ void mult(int *d_a, int *d_b, int  *h_c, int numElements)
     }
 }
 
-__global__ void mod(int *d_a, int *d_b, int  *h_c, int numElements)
+__global__ void mod(int *d_a, int *d_b, int *h_c, int numElements)
 {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -79,14 +79,15 @@ __host__ std::tuple<int *, int *> allocateRandomHostMemory(int numElements)
 
 // Based heavily on https://www.gormanalysis.com/blog/reading-and-writing-csv-files-with-cpp/
 // Presumes that there is no header in the csv file
-__host__ std::tuple<int *, int *, int>readCsv(std::string filename)
+__host__ std::tuple<int *, int *, int> readCsv(std::string filename)
 {
     vector<int> tempResult;
     // Create an input filestream
     ifstream myFile(filename);
 
     // Make sure the file is open
-    if(!myFile.is_open()) throw runtime_error("Could not open file");
+    if (!myFile.is_open())
+        throw runtime_error("Could not open file");
 
     // Helper vars
     string line, colname;
@@ -96,17 +97,19 @@ __host__ std::tuple<int *, int *, int>readCsv(std::string filename)
     getline(myFile, line);
     // Create a stringstream of the current line
     stringstream ss0(line);
-    
+
     // Extract each integer
-    while(ss0 >> val){
+    while (ss0 >> val)
+    {
         tempResult.push_back(val);
         // If the next token is a comma, ignore it and move on
-        if(ss0.peek() == ',') ss0.ignore();
+        if (ss0.peek() == ',')
+            ss0.ignore();
     }
 
     int numElements = tempResult.size();
     // Allocate the host input vector A
-    int *h_a = (int *)malloc(numElements*sizeof(int));
+    int *h_a = (int *)malloc(numElements * sizeof(int));
     // Copy all elements of vector to input_a
     copy(tempResult.begin(), tempResult.end(), h_a);
     tempResult.clear();
@@ -115,17 +118,19 @@ __host__ std::tuple<int *, int *, int>readCsv(std::string filename)
     getline(myFile, line);
     // Create a stringstream of the current line
     stringstream ss1(line);
-    
+
     // Extract each integer
-    while(ss1 >> val){
+    while (ss1 >> val)
+    {
         tempResult.push_back(val);
         // If the next token is a comma, ignore it and move on
-        if(ss1.peek() == ',') ss1.ignore();
+        if (ss1.peek() == ',')
+            ss1.ignore();
     }
 
     // Allocate the host pinned memory input pointer B
     int *h_b;
-    cudaMallocHost((int **)&h_b, numElements*sizeof(int));
+    cudaMallocHost((int **)&h_b, numElements * sizeof(int));
 
     // Copy all elements of vector to input_a
     copy(tempResult.begin(), tempResult.end(), h_b);
@@ -184,17 +189,21 @@ __host__ void copyFromHostToDevice(int *h_a, int *h_b, int *d_a, int *d_b, int n
 __host__ void executeKernel(int *d_a, int *d_b, int *h_c, int numElements, int threadsPerBlock, std::string mathematicalOperation)
 {
     // Launch the search CUDA Kernel
-    int blocksPerGrid =(numElements + threadsPerBlock - 1) / threadsPerBlock;
+    int blocksPerGrid = (numElements + threadsPerBlock - 1) / threadsPerBlock;
     if (!strcmp(mathematicalOperation.c_str(), "sub"))
     {
         sub<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, h_c, numElements);
-    } else if (!strcmp(mathematicalOperation.c_str(), "mult"))
+    }
+    else if (!strcmp(mathematicalOperation.c_str(), "mult"))
     {
         mult<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, h_c, numElements);
-    } else if (!strcmp(mathematicalOperation.c_str(), "mod"))
+    }
+    else if (!strcmp(mathematicalOperation.c_str(), "mod"))
     {
         mod<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, h_c, numElements);
-    } else {
+    }
+    else
+    {
         add<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, h_c, numElements);
     }
     cudaError_t err = cudaGetLastError();
@@ -223,7 +232,6 @@ __host__ void deallocateMemory(int *d_a, int *d_b)
         fprintf(stderr, "Failed to free device vector d_b (error code %s)!\n", cudaGetErrorString(err));
         exit(EXIT_FAILURE);
     }
-
 }
 
 // Reset the device and exit
@@ -245,11 +253,11 @@ __host__ void cleanUpDevice()
 
 __host__ void outputToFile(std::string currentPartId, int *h_a, int *h_b, int *h_c, int numElements, std::string mathematicalOperation)
 {
-	string outputFileName = "output-" + currentPartId + ".txt";
-	// NOTE: Do not remove this output to file statement as it is used to grade assignment,
-	// so it should be called by each thread
-	ofstream outputFile;
-	outputFile.open (outputFileName, ofstream::app);
+    string outputFileName = "output-" + currentPartId + ".txt";
+    // NOTE: Do not remove this output to file statement as it is used to grade assignment,
+    // so it should be called by each thread
+    ofstream outputFile;
+    outputFile.open(outputFileName, ofstream::app);
 
     outputFile << "Mathematical Operation: " << mathematicalOperation << "\n";
     outputFile << "PartID: " << currentPartId << "\n";
@@ -266,7 +274,7 @@ __host__ void outputToFile(std::string currentPartId, int *h_a, int *h_b, int *h
         outputFile << h_c[i] << " ";
     outputFile << "\n";
 
-	outputFile.close();
+    outputFile.close();
 }
 
 __host__ std::tuple<int, std::string, int, std::string, std::string> parseCommandLineArguments(int argc, char *argv[])
@@ -277,28 +285,28 @@ __host__ std::tuple<int, std::string, int, std::string, std::string> parseComman
     std::string mathematicalOperation = "add";
     std::string inputFilename = "NULL";
 
-    for(int i = 1; i < argc; i++)
+    for (int i = 1; i < argc; i++)
     {
         std::string option(argv[i]);
         i++;
         std::string value(argv[i]);
-        if(option.compare("-t") == 0) 
+        if (option.compare("-t") == 0)
         {
             threadsPerBlock = atoi(value.c_str());
         }
-        else if(option.compare("-n") == 0) 
+        else if (option.compare("-n") == 0)
         {
             numElements = atoi(value.c_str());
         }
-        else if(option.compare("-f") == 0) 
+        else if (option.compare("-f") == 0)
         {
             inputFilename = value;
         }
-        else if(option.compare("-p") == 0) 
+        else if (option.compare("-p") == 0)
         {
             currentPartId = value;
         }
-        else if(option.compare("-o") == 0) 
+        else if (option.compare("-o") == 0)
         {
             mathematicalOperation = value;
         }
@@ -313,16 +321,16 @@ __host__ std::tuple<int *, int *, int> setUpInput(std::string inputFilename, int
     int *h_a;
     int *h_b;
 
-    if(inputFilename.compare("NULL") != 0)
+    if (inputFilename.compare("NULL") != 0)
     {
-        tuple<int *, int*, int>csvData = readCsv(inputFilename);
+        tuple<int *, int *, int> csvData = readCsv(inputFilename);
         h_a = get<0>(csvData);
         h_b = get<1>(csvData);
         numElements = get<2>(csvData);
     }
-    else 
+    else
     {
-        tuple<int *, int*> randomData = allocateRandomHostMemory(numElements);
+        tuple<int *, int *> randomData = allocateRandomHostMemory(numElements);
         h_a = get<0>(randomData);
         h_b = get<1>(randomData);
     }
@@ -340,8 +348,8 @@ __host__ std::tuple<int *, int *, int> setUpInput(std::string inputFilename, int
  */
 int main(int argc, char *argv[])
 {
-    auto[numElements, currentPartId, threadsPerBlock, inputFilename, mathematicalOperation] = parseCommandLineArguments(argc, argv);
-    tuple<int *, int*, int> searchInputTuple = setUpInput(inputFilename, numElements);
+    auto [numElements, currentPartId, threadsPerBlock, inputFilename, mathematicalOperation] = parseCommandLineArguments(argc, argv);
+    tuple<int *, int *, int> searchInputTuple = setUpInput(inputFilename, numElements);
     int *h_a;
     int *h_b;
 
@@ -353,7 +361,7 @@ int main(int argc, char *argv[])
 
     // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_c needs to be unified memory
 
-    auto[d_a, d_b] = allocateDeviceMemory(numElements);
+    auto [d_a, d_b] = allocateDeviceMemory(numElements);
     copyFromHostToDevice(h_a, h_b, d_a, d_b, numElements);
 
     executeKernel(d_a, d_b, h_c, numElements, threadsPerBlock, mathematicalOperation);

@@ -4,6 +4,43 @@
 
 ### M3: Host and Global Memory
 
+1. cuda host memory model
+- Pageable
+    ```cpp
+    int size = 1024;
+    int *arr;
+    arr = (int *)malloc(size * sizeof(int));
+    ```
+
+- pinned: removes extra host-side memory transfers
+```cpp
+int size = 1024;
+float *arr;
+cudaMallocHost((float **) &arr, size * sizeof(float));
+```
+
+
+- mapped: no copies to device memory
+```cpp
+cudaHostMalloc((float **) &arr, size * sizeof(float), cudaHostAllocMapped);
+```
+
+- unified: no need to worry about copies let system do it for you
+```cpp
+cudaMallocManaged((int **) &arr, size * sizeof(float));
+```
+
+2. cuda device memory
+```
+cudaMalloc(void ** devPtr, size_t size)
+```
+
+```
+cudaMemcopy()
+
+cudaHostGetDevicePointer()
+```
+
 ### M4: Shared and Constant Memory
 
 ### M5: Register Memory
