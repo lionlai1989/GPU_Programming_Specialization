@@ -1,77 +1,84 @@
-/*
- * Copyright 1993-2015 NVIDIA Corporation.  All rights reserved.
- *
- * Please refer to the NVIDIA end user license agreement (EULA) associated
- * with this source code for terms and conditions that govern your use of
- * this software. Any use, reproduction, disclosure, or distribution of
- * this software and related documentation outside the terms of the EULA
- * is strictly prohibited.
- *
- */
 #include "memory_allocation.h"
 
-__global__ void add(int *d_a, int *d_b, int *h_c, int numElements)
+__global__ void add(int *d_a, int *d_b, int *d_c, int numElements)
 {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (i < numElements)
     {
-        h_c[i] = d_a[i] + d_b[i];
+        d_c[i] = d_a[i] + d_b[i];
     }
 }
 
-__global__ void sub(int *d_a, int *d_b, int *h_c, int numElements)
+__global__ void sub(int *d_a, int *d_b, int *d_c, int numElements)
 {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (i < numElements)
     {
-        h_c[i] = d_a[i] - d_b[i];
+        d_c[i] = d_a[i] - d_b[i];
     }
 }
 
-__global__ void mult(int *d_a, int *d_b, int *h_c, int numElements)
+__global__ void mult(int *d_a, int *d_b, int *d_c, int numElements)
 {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (i < numElements)
     {
-        h_c[i] = d_a[i] * d_b[i];
+        d_c[i] = d_a[i] * d_b[i];
     }
 }
 
-__global__ void mod(int *d_a, int *d_b, int *h_c, int numElements)
+__global__ void mod(int *d_a, int *d_b, int *d_c, int numElements)
 {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (i < numElements)
     {
-        h_c[i] = d_a[i] % d_b[i];
+        d_c[i] = d_a[i] % d_b[i];
     }
 }
 
 __host__ std::tuple<int *, int *> allocateRandomHostMemory(int numElements)
 {
-    srand(time(0));
+    // Seeds the pseudo-random number generator used by std::rand() with the value seed.
+    std::srand(time(0));
     size_t size = numElements * sizeof(int);
 
-    // Allocate the host input vector A
+    // Task: allocate pageable memory for h_a
+    int *h_a;
+    h_a = (int *)malloc(size);
+    if (h_a == NULL)
+    {
+        fprintf(stderr, "Failed to allocate host memory for h_a\n");
+        exit(EXIT_FAILURE);
+    }
 
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_a needs to be pageable memory
-
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_a needs to be pageable memory
-
-    // Allocate the host pinned memory input pointer B
-    int *h_b;
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_b needs to be pinned memory
-
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_b needs to be pinned memory
+    // Task: allocate pinned memory for h_b
+    int *h_b = NULL;
+    /**
+     *  __host__ ​cudaError_t cudaMallocHost ( void** ptr, size_t size )
+     * Allocates size bytes of host memory that is page-locked and accessible to
+       the device. The driver tracks the virtual memory ranges allocated with
+       this function and automatically accelerates calls to functions such as
+       cudaMemcpy(). Since the memory can be accessed directly by the device, it
+       can be read or written with much higher bandwidth than pageable memory
+       obtained with functions such as malloc().
+     */
+    cudaError_t err = cudaMallocHost((void **)&h_b, size);
+    if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to allocate pinned host memory for h_b (error code %s)!\n",
+                cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
 
     // Initialize the host input vectors
     for (int i = 0; i < numElements; ++i)
     {
-        h_a[i] = rand() % 100;
-        h_b[i] = rand() % 100;
+        h_a[i] = std::rand() % 100;
+        h_b[i] = std::rand() % 100;
     }
 
     return {h_a, h_b};
@@ -142,23 +149,25 @@ __host__ std::tuple<int *, int *, int> readCsv(std::string filename)
 
 __host__ std::tuple<int *, int *> allocateDeviceMemory(int numElements)
 {
-    // Allocate the device input vector A
-    int *d_a = NULL;
     size_t size = numElements * sizeof(int);
     cudaError_t err;
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_a needs to handle pageable memory and copies
 
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_a needs to handle pageable memory and copies
+    // Task: allocate memory for d_a
+    int *d_a = NULL;
+    /**
+     *  __host__ ​ __device__ ​cudaError_t cudaMalloc ( void** devPtr, size_t size )
+     * Allocates size bytes of linear memory on the device and returns in
+       "*devPtr" a pointer to the allocated memory.
+     */
+    err = cudaMalloc((void **)&d_a, size);
     if (err != cudaSuccess)
     {
         fprintf(stderr, "Failed to allocate device vector d_a (error code %s)!\n", cudaGetErrorString(err));
         exit(EXIT_FAILURE);
     }
 
-    int *d_b;
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_b needs to handle pinned memory and copies
-
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_b needs to handle pinned memory and copies
+    int *d_b = NULL;
+    err = cudaMalloc((void **)&d_b, size);
     if (err != cudaSuccess)
     {
         fprintf(stderr, "Failed to allocate device vector d_a (error code %s)!\n", cudaGetErrorString(err));
@@ -190,15 +199,18 @@ __host__ void executeKernel(int *d_a, int *d_b, int *h_c, int numElements, int t
 {
     // Launch the search CUDA Kernel
     int blocksPerGrid = (numElements + threadsPerBlock - 1) / threadsPerBlock;
-    if (!strcmp(mathematicalOperation.c_str(), "sub"))
+    // if (!strcmp(mathematicalOperation.c_str(), "sub"))
+    if (mathematicalOperation == "sub")
     {
         sub<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, h_c, numElements);
     }
-    else if (!strcmp(mathematicalOperation.c_str(), "mult"))
+    // else if (!strcmp(mathematicalOperation.c_str(), "mult"))
+    else if (mathematicalOperation == "mult")
     {
         mult<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, h_c, numElements);
     }
-    else if (!strcmp(mathematicalOperation.c_str(), "mod"))
+    // else if (!strcmp(mathematicalOperation.c_str(), "mod"))
+    else if (mathematicalOperation == "mod")
     {
         mod<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, h_c, numElements);
     }
@@ -349,7 +361,7 @@ __host__ std::tuple<int *, int *, int> setUpInput(std::string inputFilename, int
 int main(int argc, char *argv[])
 {
     auto [numElements, currentPartId, threadsPerBlock, inputFilename, mathematicalOperation] = parseCommandLineArguments(argc, argv);
-    tuple<int *, int *, int> searchInputTuple = setUpInput(inputFilename, numElements);
+    std::tuple<int *, int *, int> searchInputTuple = setUpInput(inputFilename, numElements);
     int *h_a;
     int *h_b;
 
@@ -357,9 +369,21 @@ int main(int argc, char *argv[])
     h_b = get<1>(searchInputTuple);
     numElements = get<2>(searchInputTuple);
 
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_c needs to be unified memory
-
-    // FILL IN HOST AND DEVICE MEMORY ALLOCATION CODE - SPECIFICALLY h_c needs to be unified memory
+    // Task: allocate unified memory for h_c
+    int *h_c = NULL;
+    /**
+     *  __host__ ​cudaError_t cudaMallocManaged ( void** devPtr, size_t size, unsigned int  flags = cudaMemAttachGlobal )
+     * Allocates size bytes of managed memory on the device and returns in
+     * `*devPtr` a pointer to the allocated memory. The pointer is valid on the
+     * CPU and on all GPUs in the system that support managed memory. All
+     * accesses to this pointer must obey the Unified Memory programming model.
+     */
+    cudaError_t err = cudaMallocManaged((void **)&h_c, numElements * sizeof(int));
+    if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to allocate unified memory for h_c (error code %s)!\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
 
     auto [d_a, d_b] = allocateDeviceMemory(numElements);
     copyFromHostToDevice(h_a, h_b, d_a, d_b, numElements);

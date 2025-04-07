@@ -4,10 +4,12 @@
 #include <string>
 #include <fstream>
 #include <vector>
-#include <utility>   // std::pair
-#include <stdexcept> // std::runtime_error
-#include <sstream>   // std::stringstream
+#include <utility>   // pair
+#include <stdexcept> // runtime_error
+#include <sstream>   // stringstream
 #include <ctime>
+#include <cstdlib> // rand, srand
+
 using namespace std;
 
 __global__ void add(int *d_a, int *d_b, int *d_c, int numElements);

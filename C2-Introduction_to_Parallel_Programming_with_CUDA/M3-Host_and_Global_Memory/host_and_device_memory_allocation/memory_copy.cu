@@ -1,13 +1,3 @@
-/*
- * Copyright 1993-2015 NVIDIA Corporation.  All rights reserved.
- *
- * Please refer to the NVIDIA end user license agreement (EULA) associated
- * with this source code for terms and conditions that govern your use of
- * this software. Any use, reproduction, disclosure, or distribution of
- * this software and related documentation outside the terms of the EULA
- * is strictly prohibited.
- *
- */
 #include "memory_copy.h"
 
 __global__ void div(float *d_a, float *d_b, float *h_c, int numElements)
@@ -46,7 +36,7 @@ __host__ std::tuple<float *, float *> allocateRandomHostMemory(int numElements)
 // Presumes that there is no header in the csv file
 __host__ std::tuple<float *, float *, int> readCsv(std::string filename)
 {
-    vector<int> tempResult;
+    vector<float> tempResult;
     // Create an input filestream
     ifstream myFile(filename);
 
@@ -125,7 +115,7 @@ __host__ std::tuple<float *, float *> allocateDeviceMemory(int numElements)
     err = cudaMalloc(&d_b, size);
     if (err != cudaSuccess)
     {
-        fprintf(stderr, "Failed to allocate device vector d_a (error code %s)!\n", cudaGetErrorString(err));
+        fprintf(stderr, "Failed to allocate device vector d_b (error code %s)!\n", cudaGetErrorString(err));
         exit(EXIT_FAILURE);
     }
     return {d_a, d_b};
@@ -133,11 +123,15 @@ __host__ std::tuple<float *, float *> allocateDeviceMemory(int numElements)
 
 __host__ void copyFromHostToDevice(float *h_a, float *h_b, float *d_a, float *d_b, int numElements)
 {
-    size_t size = numElements * sizeof(int);
+    size_t size = numElements * sizeof(float);
 
     cudaError_t err;
 
-    // FILL IN HOST AND DEVICE MEMORY COPY CODE - SPECIFICALLY copy h_a to d_a
+    /**
+     *  __host__ ​cudaError_t cudaMemcpy ( void* dst, const void* src, size_t count, cudaMemcpyKind kind )
+     * Copies count bytes from the memory area pointed to by src to the memory
+       area pointed to by dst.
+     */
     err = cudaMemcpy(d_a, h_a, size, cudaMemcpyHostToDevice);
     // FILL IN HOST AND DEVICE MEMORY COPY CODE - SPECIFICALLY copy h_a to d_a
 

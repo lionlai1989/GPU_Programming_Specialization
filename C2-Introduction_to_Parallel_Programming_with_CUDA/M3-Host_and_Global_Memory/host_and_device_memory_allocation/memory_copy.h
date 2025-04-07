@@ -4,9 +4,9 @@
 #include <string>
 #include <fstream>
 #include <vector>
-#include <utility>   // std::pair
-#include <stdexcept> // std::runtime_error
-#include <sstream>   // std::stringstream
+#include <utility>   // pair
+#include <stdexcept> // runtime_error
+#include <sstream>   // stringstream
 #include <ctime>
 using namespace std;
 
