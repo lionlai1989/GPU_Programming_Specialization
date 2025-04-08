@@ -43,6 +43,40 @@ cudaHostGetDevicePointer()
 
 ### M4: Shared and Constant Memory
 
+#### shared memory
+shared memory in done inside the kernel, since threads in a block share L1
+cache.
+
+if the size is known at compile time:
+```
+__shared__ int arr[10];
+```
+
+if the size is not known at compile time:
+```
+extern __shared__ int arr[];
+```
+
+shared memory is faster than global memory.
+
+synchronize all threads such that all threads stop at thread barriers.
+```
+__synchthreads();
+```
+
+#### constant memory
+
+constant memory is read-only. it's globally accessible on all threads
+simultaneously.
+
+```
+__constant__ int arr[10];
+
+ __host__ ​cudaError_t cudaMemcpyToSymbol ( const void* symbol, const void* src, size_t count, size_t offset = 0, cudaMemcpyKind kind = cudaMemcpyHostToDevice ) 
+```
+
+an example use of constant memory, the kernel of gaussian blur.
+
 ### M5: Register Memory
 
 

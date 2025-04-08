@@ -8,6 +8,7 @@
 #include <stdexcept> // std::runtime_error
 #include <sstream>   // std::stringstream
 #include <ctime>
+
 using namespace std;
 
 const float LO_RAND = 0.0;
