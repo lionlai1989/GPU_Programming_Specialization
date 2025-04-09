@@ -4,13 +4,17 @@ __global__ void kernel(uchar *d_r, uchar *d_g, uchar *d_b)
 {
     // Calculate data size and thread index
     int num_image_pixels = d_rows * d_columns;
-    int blockId = blockIdx.x + blockIdx.y * gridDim.x + gridDim.x * gridDim.y * blockIdx.z;
-    int threadId = blockId * (blockDim.x * blockDim.y * blockDim.z) + (threadIdx.z * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+    // int blockId = blockIdx.x + blockIdx.y * gridDim.x + gridDim.x * gridDim.y * blockIdx.z;
+    // int threadId = blockId * (blockDim.x * blockDim.y * blockDim.z) + (threadIdx.z * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+
+    int threadId = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (threadId < num_image_pixels)
     {
         // Initialize variables or arrays to hold RGB values from device
-
+        d_r[threadId] = 255 - d_r[threadId];
+        d_g[threadId] = 255 - d_g[threadId];
+        d_b[threadId] = 255 - d_b[threadId];
         // sync threads so that you can alter RGB values without causing race condition
 
         // Perform calculations on per thread basis
@@ -92,7 +96,7 @@ __host__ void executeKernel(uchar *d_r, uchar *d_g, uchar *d_b, int rows, int co
     // Launch the convert CUDA Kernel
     int blocksPerGrid = (rows * columns) / threadsPerBlock;
 
-    applySimpleLinearBlurFilter<<<blocksPerGrid, threadsPerBlock>>>(d_r, d_g, d_b);
+    kernel<<<blocksPerGrid, threadsPerBlock>>>(d_r, d_g, d_b);
     cudaError_t err = cudaGetLastError();
 
     if (err != cudaSuccess)
@@ -234,9 +238,9 @@ __host__ std::tuple<int, int, uchar *, uchar *, uchar *> readImageFromFile(std::
             uchar blue = intensity.val[0];
             uchar green = intensity.val[1];
             uchar red = intensity.val[2];
-            h_r[r * rows + c] = red;
-            h_g[r * rows + c] = green;
-            h_b[r * rows + c] = blue;
+            h_r[r * columns + c] = red;
+            h_g[r * columns + c] = green;
+            h_b[r * columns + c] = blue;
         }
     }
 
@@ -267,7 +271,7 @@ int main(int argc, char *argv[])
         deallocateMemory(d_r, d_g, d_b);
         cleanUpDevice();
 
-        Mat outputImageMat(rows, columns, CV_8UC1);
+        Mat outputImageMat(rows, columns, CV_8UC3);
         vector<int> compression_params;
         compression_params.push_back(IMWRITE_PNG_COMPRESSION);
         compression_params.push_back(9);
@@ -276,7 +280,9 @@ int main(int argc, char *argv[])
         {
             for (int c = 0; c < columns; ++c)
             {
-                outputImageMat.at<uchar>(r, c) = gray[r * rows + c];
+                int idx = r * columns + c;
+                outputImageMat.at<Vec3b>(r, c) = Vec3b(h_b[idx], h_g[idx], h_r[idx]);
+                // outputImageMat.at<uchar>(r, c) = gray[r * columns + c];
             }
         }
 
