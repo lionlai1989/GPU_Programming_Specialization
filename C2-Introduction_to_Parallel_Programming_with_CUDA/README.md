@@ -78,7 +78,34 @@ __constant__ int arr[10];
 an example use of constant memory, the kernel of gaussian blur.
 
 ### M5: Register Memory
+all variable are allocated as regster memory in kernel function.
+thread-save memory.
+when memory is allocated beyond register memory, CUDA will need to read/write
+data from/to cache memory.
 
+### Device Memory comparison
+
+Below are short descriptions for each memory type, using NVIDIA RTX A3000
+specifications:
+
+- Global Memory: The RTX A3000 features 6 GB of GDDR6 global memory. It offers a
+  large capacity for all non-constant data, but access is slower compared to
+  on-chip memories.
+
+- Constant Memory: This GPU provides 64 KB of constant memory, which is
+  optimized for broadcast access to read-only data shared across all threads.
+
+- Shared Memory: Each SM on the RTX A3000 can be configured with up to 96 KB of
+  low-latency shared memory. It enables fast communication and data sharing
+  among threads within a block.
+
+- Register Memory: The register file per SM on the RTX A3000 is extremely fast,
+  offering around 256 KB for thread-local and thread-save access. Although registers are
+  limited per thread, they provide the quickest access for temporary variables.
+
+Streaming Multiprocessor (SM)—a core processing unit within an NVIDIA GPU.
+Each SM contains many CUDA cores, registers, shared memory, and other resources,
+allowing it to execute many threads in parallel.
 
 ### References:
 
