@@ -1,19 +1,45 @@
 #include "simpleLinearBlurFilter.hpp"
 
+void checkCudaError(cudaError_t err, const char *functionName)
+{
+    if (err != cudaSuccess)
+    {
+        std::cerr << "CUDA error in " << functionName << ": "
+                  << cudaGetErrorString(err) << std::endl;
+        exit(EXIT_FAILURE);
+    }
+}
+
 __global__ void applySimpleLinearBlurFilter(uchar *r, uchar *g, uchar *b)
 {
-    // Consider using shared memory for the purpose of keeping the original input values
-    // You can also use a constant array for handling edge cases or applying a custom filter
+    // Total number of pixels from constant memory.
+    int num_image_pixels = d_rows * d_columns;
+
+    // Compute global 1D thread index.
+    int threadId = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (threadId < num_image_pixels)
     {
-        // When using shared memory you should store pixel values relevant to the current thread in a variable
+        // Compute row and column based on d_columns.
+        int row = threadId / d_columns;
+        int col = threadId % d_columns;
 
-        // sync threads so that you can alter RGB values without causing race condition
-        __syncthreads();
+        // Process only pixels that have a left and right neighbor.
+        if (col > 0 && col < d_columns - 1)
+        {
+            int idx_left = threadId - 1;
+            int idx_right = threadId + 1;
 
-        // Apply a simple filter that averages the RGB values to the left and right of the pixel at the current thread id location
-        // Another area for improvement is handling when the current thread is at the let or right edge of the imput image
+            // For each channel, compute the average.
+            uchar new_r = (r[idx_left] + r[threadId] + r[idx_right]) / 3;
+            uchar new_g = (g[idx_left] + g[threadId] + g[idx_right]) / 3;
+            uchar new_b = (b[idx_left] + b[threadId] + b[idx_right]) / 3;
+
+            r[threadId] = new_r;
+            g[threadId] = new_g;
+            b[threadId] = new_b;
+        }
+        // For edge pixels, you may opt to leave them unchanged.
     }
 }
 
@@ -53,36 +79,21 @@ __host__ void allocateDeviceMemory(int rows, int columns)
 
 __host__ void executeKernel(uchar *r, uchar *g, uchar *b, int rows, int columns, int threadsPerBlock)
 {
-    cout << "Executing kernel\n";
-    // Launch the convert CUDA Kernel
-    int blocksPerGrid = (rows * columns) / threadsPerBlock;
+    std::cout << "Executing kernel" << std::endl;
+    int totalPixels = rows * columns;
+    int blocksPerGrid = (totalPixels + threadsPerBlock - 1) / threadsPerBlock;
 
+    // Launch the kernel.
     applySimpleLinearBlurFilter<<<blocksPerGrid, threadsPerBlock>>>(r, g, b);
     cudaError_t err = cudaGetLastError();
-
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to launch vectorAdd kernel (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(err, "Launch kernel");
 }
 
 // Reset the device and exit
 __host__ void cleanUpDevice()
 {
-    cout << "Cleaning CUDA device\n";
-    // cudaDeviceReset causes the driver to clean up all state. While
-    // not mandatory in normal operation, it is good practice.  It is also
-    // needed to ensure correct operation when the application is being
-    // profiled. Calling cudaDeviceReset causes all profile data to be
-    // flushed before the application exits
-    cudaError_t err = cudaDeviceReset();
-
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to deinitialize the device! error=%s\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    std::cout << "Cleaning CUDA device" << std::endl;
+    checkCudaError(cudaDeviceReset(), "cudaDeviceReset");
 }
 
 __host__ std::tuple<std::string, std::string, std::string, int> parseCommandLineArguments(int argc, char *argv[])

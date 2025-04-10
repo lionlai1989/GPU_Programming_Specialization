@@ -9,6 +9,7 @@
 using namespace cv;
 using namespace std;
 
+// CUDA constant memory for image dimensions
 __device__ __constant__ int d_rows;
 __device__ __constant__ int d_columns;
 

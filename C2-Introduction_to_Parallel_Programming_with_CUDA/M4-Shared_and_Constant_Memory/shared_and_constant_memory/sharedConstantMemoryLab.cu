@@ -1,5 +1,15 @@
 #include "sharedConstantMemoryLab.hpp"
 
+void checkCudaError(cudaError_t err, const char *functionName)
+{
+    if (err != cudaSuccess)
+    {
+        std::cerr << "CUDA error in " << functionName << ": "
+                  << cudaGetErrorString(err) << std::endl;
+        exit(EXIT_FAILURE);
+    }
+}
+
 __global__ void kernel(uchar *d_r, uchar *d_g, uchar *d_b)
 {
     // Calculate data size and thread index
@@ -21,6 +31,17 @@ __global__ void kernel(uchar *d_r, uchar *d_g, uchar *d_b)
     }
 }
 
+__host__ void executeKernel(uchar *d_r, uchar *d_g, uchar *d_b, int rows, int columns, int threadsPerBlock)
+{
+    std::cout << "Executing kernel\n";
+    // Launch the convert CUDA Kernel
+    int blocksPerGrid = (totalPixels + threadsPerBlock - 1) / threadsPerBlock;
+
+    kernel<<<blocksPerGrid, threadsPerBlock>>>(d_r, d_g, d_b);
+    cudaError_t err = cudaGetLastError();
+    checkCudaError(err, "Launch kernel");
+}
+
 __host__ std::tuple<uchar *, uchar *, uchar *> allocateDeviceMemory(int rows, int columns)
 {
     cout << "Allocating GPU device memory\n";
@@ -30,29 +51,17 @@ __host__ std::tuple<uchar *, uchar *, uchar *> allocateDeviceMemory(int rows, in
     // Allocate the device input vector d_r
     uchar *d_r = NULL;
     cudaError_t err = cudaMalloc(&d_r, size);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to allocate device vector d_r (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(err, ("cudaMalloc d_r with size " + std::to_string(size)).c_str());
 
     // Allocate the device input vector d_g
     uchar *d_g = NULL;
     err = cudaMalloc(&d_g, size);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to allocate device vector d_g (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(err, ("cudaMalloc d_g with size " + std::to_string(size)).c_str());
 
     // Allocate the device input vector d_b
     uchar *d_b = NULL;
     err = cudaMalloc(&d_b, size);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to allocate device vector d_b (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(err, ("cudaMalloc d_b with size " + std::to_string(size)).c_str());
 
     // Allocate device constant symbols for rows and columns
     cudaMemcpyToSymbol(d_rows, &rows, sizeof(int), 0, cudaMemcpyHostToDevice);
@@ -69,41 +78,13 @@ __host__ void copyFromHostToDevice(uchar *h_r, uchar *d_r, uchar *h_g, uchar *d_
 
     cudaError_t err;
     err = cudaMemcpy(d_r, h_r, size, cudaMemcpyHostToDevice);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to copy vector r from host to device (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(err, "cudaMemcpy from h_r to d_r");
 
     err = cudaMemcpy(d_g, h_g, size, cudaMemcpyHostToDevice);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to copy vector g from host to device (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(err, "cudaMemcpy from h_g to d_g");
 
     err = cudaMemcpy(d_b, h_b, size, cudaMemcpyHostToDevice);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to copy vector b from host to device (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
-}
-
-__host__ void executeKernel(uchar *d_r, uchar *d_g, uchar *d_b, int rows, int columns, int threadsPerBlock)
-{
-    cout << "Executing kernel\n";
-    // Launch the convert CUDA Kernel
-    int blocksPerGrid = (rows * columns) / threadsPerBlock;
-
-    kernel<<<blocksPerGrid, threadsPerBlock>>>(d_r, d_g, d_b);
-    cudaError_t err = cudaGetLastError();
-
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to launch vectorAdd kernel (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(err, "cudaMemcpy from h_b to d_b");
 }
 
 __host__ void copyFromDeviceToHost(uchar *d_r, uchar *d_g, uchar *d_b, uchar *h_r, uchar *h_g, uchar *h_b, int rows, int columns)
@@ -112,55 +93,24 @@ __host__ void copyFromDeviceToHost(uchar *d_r, uchar *d_g, uchar *d_b, uchar *h_
     // Copy the device result int array in device memory to the host result int array in host memory.
     size_t size = rows * columns * sizeof(uchar);
 
-    cudaError_t err = cudaMemcpy(h_r, d_r, size, cudaMemcpyDeviceToHost);
-
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to copy array d_r from device to host (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    cudaError_t err;
+    err = cudaMemcpy(h_r, d_r, size, cudaMemcpyDeviceToHost);
+    checkCudaError(err, "cudaMemcpy from d_r to h_r");
 
     err = cudaMemcpy(h_g, d_g, size, cudaMemcpyDeviceToHost);
-
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to copy array d_g from device to host (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(err, "cudaMemcpy from d_g to h_g");
 
     err = cudaMemcpy(h_b, d_b, size, cudaMemcpyDeviceToHost);
-
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to copy array d_b from device to host (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(err, "cudaMemcpy from d_b to h_b");
 }
 
 // Free device global memory
 __host__ void deallocateMemory(uchar *d_r, uchar *d_g, uchar *d_b)
 {
-    cout << "Deallocating GPU device memory\n";
-    cudaError_t err = cudaFree(d_r);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to free device vector d_r (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
-
-    err = cudaFree(d_g);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to free device vector d_g (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
-
-    err = cudaFree(d_b);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to free device vector d_b (error code %s)!\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    std::cout << "Deallocating GPU device memory\n";
+    checkCudaError(cudaFree(d_r), "cudaFree d_r");
+    checkCudaError(cudaFree(d_g), "cudaFree d_g");
+    checkCudaError(cudaFree(d_b), "cudaFree d_b");
 }
 
 // Reset the device and exit
@@ -172,13 +122,7 @@ __host__ void cleanUpDevice()
     // needed to ensure correct operation when the application is being
     // profiled. Calling cudaDeviceReset causes all profile data to be
     // flushed before the application exits
-    cudaError_t err = cudaDeviceReset();
-
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to deinitialize the device! error=%s\n", cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }
+    checkCudaError(cudaDeviceReset(), "cudaDeviceReset");
 }
 
 __host__ std::tuple<std::string, std::string, std::string, int> parseCommandLineArguments(int argc, char *argv[])
