@@ -4,42 +4,49 @@
 
 ### M3: Host and Global Memory
 
-1. cuda host memory model
-- Pageable
-    ```cpp
-    int size = 1024;
-    int *arr;
-    arr = (int *)malloc(size * sizeof(int));
-    ```
+#### CUDA Host Memory Model
 
-- pinned: removes extra host-side memory transfers
-```cpp
-int size = 1024;
-float *arr;
-cudaMallocHost((float **) &arr, size * sizeof(float));
-```
+- **Pageable:** Regular host memory allocated via the OS.
+  ```cpp
+  int *arr;
+  arr = (int *)malloc(1024 * sizeof(int));
+  ```
 
+- **Pinned:** Page-locked memory to reduce extra host-device transfers.
+  `cudaMallocHost` allocates `size` bytes of host memory that is page-locked and
+  accessible to the device. Since the memory can be accessed directly by the
+  device, it can be read or written with much higher bandwidth than pageable
+  memory obtained with functions such as `malloc`. `arr` can be accessed
+  directly by the device and host.
+  ```cpp
+  float *arr;
+  cudaMallocHost((void **)&arr, 1024 * sizeof(float));
+  ```
 
-- mapped: no copies to device memory
-```cpp
-cudaHostMalloc((float **) &arr, size * sizeof(float), cudaHostAllocMapped);
-```
+- **Mapped:** Page-locked memory that is directly accessible from the device.
+  `cudaHostAlloc` allocates page-locked memory on the host. When flag
+  `cudaHostAllocDefault` is used, it's equivalent to calling `cudaMallocHost`.
+  When flag `cudaHostAllocMapped` is used, the device pointer can be obtained
+  via `cudaHostGetDevicePointer`.
+  ```cpp
+  float *arr;
+  cudaHostAlloc((void **)&arr, 1024 * sizeof(float), cudaHostAllocMapped);
+  ```
 
-- unified: no need to worry about copies let system do it for you
-```cpp
-cudaMallocManaged((int **) &arr, size * sizeof(float));
-```
+- **Unified:** Managed memory with automatic data migration between host and
+  device. `cudaMallocManaged` allocates memory that will be automatically
+  managed by the Unified Memory system. 
+  ```cpp
+  float *arr;
+  cudaMallocManaged((float **)&arr, 1024 * sizeof(float));
+  ```
 
-2. cuda device memory
-```
-cudaMalloc(void ** devPtr, size_t size)
-```
+#### CUDA Device Memory Model
 
-```
-cudaMemcopy()
-
-cudaHostGetDevicePointer()
-```
+- **Allocation:** `cudaMalloc` allocates memory on the device. 
+  ```
+  cudaMalloc(void **devPtr, size_t size);
+  ```
 
 ### M4: Shared and Constant Memory
 
@@ -47,41 +54,42 @@ cudaHostGetDevicePointer()
 shared memory in done inside the kernel, since threads in a block share L1
 cache.
 
-if the size is known at compile time:
-```
-__shared__ int arr[10];
-```
+- **Usage:** Shared among threads in a block (uses L1 cache). Shared memory is
+  faster than global memory. Use thread barriers `__syncthreads()` to
+  synchronize.
+  
+- Size known at compile time:
+  ```
+  __shared__ int arr[10];
+  ```
+- Size defined at runtime:
+  ```
+  extern __shared__ int arr[];
+  ```
 
-if the size is not known at compile time:
-```
-extern __shared__ int arr[];
-```
+#### Constant Memory
 
-shared memory is faster than global memory.
-
-synchronize all threads such that all threads stop at thread barriers.
-```
-__synchthreads();
-```
-
-#### constant memory
-
-constant memory is read-only. it's globally accessible on all threads
-simultaneously.
-
-```
-__constant__ int arr[10];
-
- __host__ ​cudaError_t cudaMemcpyToSymbol ( const void* symbol, const void* src, size_t count, size_t offset = 0, cudaMemcpyKind kind = cudaMemcpyHostToDevice ) 
-```
-
-an example use of constant memory, the kernel of gaussian blur.
+- Characteristics: Read-only memory, globally accessible by all threads. Often
+  used in kernels such as those implementing Gaussian blur.
+- Declaration:
+  ```
+  __constant__ int arr[10];
+  ```
+- Copying data to constant memory:
+  ```
+  __host__ cudaError_t cudaMemcpyToSymbol(
+      const void* symbol, 
+      const void* src, 
+      size_t count, 
+      size_t offset = 0, 
+      cudaMemcpyKind kind = cudaMemcpyHostToDevice
+  );
+  ```
 
 ### M5: Register Memory
-all variable are allocated as regster memory in kernel function.
-thread-save memory.
-when memory is allocated beyond register memory, CUDA will need to read/write
-data from/to cache memory.
+All variables in kernel functions are allocated to registers by default.
+Registers are thread-safe and the fastest memory type. When memory is allocated
+beyond register memory, CUDA will need to read/write data from/to cache memory.
 
 ### Device Memory comparison
 
@@ -114,5 +122,3 @@ allowing it to execute many threads in parallel.
 - [CMU GPU Architecture & CUDA Programming](https://www.cs.cmu.edu/afs/cs/academic/class/15418-s18/www/lectures/06_gpuarch.pdf)
 
 - [CUDA Thread Basics by Wake Forest University](https://users.wfu.edu/choss/CUDA/docs/Lecture%205.pdf)
-
-- []()
