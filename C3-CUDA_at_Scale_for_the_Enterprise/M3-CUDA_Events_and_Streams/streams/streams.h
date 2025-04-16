@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <tuple>
 #include <string>
+#include <cstdlib> // srand, rand, RAND_MAX
 #include <cuda_runtime.h>
 
 // For the CUDA runtime routines (prefixed with "cuda_")

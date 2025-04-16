@@ -1,4 +1,3 @@
-// Based on code found at https://developer.download.nvidia.com/CUDA/training/StreamsAndConcurrencyWebinar.pdf
 #include "streams.h"
 
 // Increments all of the values in the input arrays
@@ -48,19 +47,18 @@ __global__ void kernelB2(float *dev_mem, int n)
 __host__ float *allocateHostMemory(int numElements, int seed)
 {
     seed = seed != -1 ? seed : 0;
-    srand(seed);
+    std::srand(seed); // Init random number generator
     size_t size = numElements * sizeof(float);
-    float random_max = 255.0f;
+    float random_max = 255.0f; // user-defined value
 
-    // Allocate the host pinned memory input pointer B
+    // Allocate pinned (page-locked) memory on host
     float *data;
     cudaHostAlloc((void **)&data, size, cudaHostAllocDefault);
 
-    // Initialize the host input vectors
+    // Initialize the host input vector
     for (int i = 0; i < numElements; ++i)
     {
-        // Feel free to change the max value of the random input data by replacing 255 with a smaller or larger number
-        data[i] = static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / random_max));
+        data[i] = static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX / random_max));
     }
 
     return data;
@@ -181,7 +179,10 @@ __host__ std::tuple<int, int> determineThreadBlockDimensions(int num_elements)
 
 __host__ float *runStreamsFullAsync(float *host_mem, int num_elements)
 {
-    // Prepare all streams such that all kernels and memory copies execute asynchronously
+    // Prepare all streams such that all kernels and memory copies execute
+    // asynchronously
+    // Creates new asynchronous and non-blocking streams on the context that is
+    // current to the calling host thread.
     cudaStream_t stream1, stream2, stream3, stream4, stream5, stream6;
     cudaStreamCreateWithFlags(&stream1, cudaStreamNonBlocking);
     cudaStreamCreateWithFlags(&stream2, cudaStreamNonBlocking);

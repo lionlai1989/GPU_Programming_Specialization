@@ -49,7 +49,24 @@ How could events be used?
     
 ### M4: Sorting Using GPUs
 
-### M5
+canonical sorting algorithms
+- bubble sort: not good for GPUs programming
+- radix sort
+- quick sort
+  
+
+### M5: Nvidia Performance Primitives (NPP)
+
+Image and Signal processing:
+
+ImagesCPU.h
+
+ImagesNPP.h
+
+SignalsCPU.h
+
+SignalNPP.h
+
 
 
 ### References:
