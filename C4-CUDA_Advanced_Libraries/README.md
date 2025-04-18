@@ -32,10 +32,33 @@ it's built on top of the cuBlAS library.
 
 - 
 
+### M4: CUDA Thrust
+
+Thrust is a powerful library of parallel algorithms and data structures.
+
+What is Thrust?
+
+    Thrust is a Nvidia-developed library designed to be similar to C++'s STL and Boost libraries
+
+    Abstracts away some of the lower-level concerns of developing with CUDA
+
+    Main data type is the Vector, there is a host_vector and device_vector
+
+    Uses iterators to allow for simpler parallelization and passing sections of vectors using the begin() and end() methods.
+
+    Less of a need to deal with pointers
+
+Vector Functions
+
+    vector.fill(start, end, value) – fill in the interval with the passed value – use vector.begin() and vector.end() to set all indices
+
+    vector.sequence(start, end, start_val, end_val) – fill in the interval with the sequence of integers between start and end values; if the final two args not included, values are 0, 1, ..., n-1
+
+    vector.copy(start, end, other_vec.start) – copies the values in vector interval [start, end] into other_vec starting at index start
+
+    
+### M5: cuDNN and cuTENSOR
 
 
-### M4:
-
-### M5:
 
 ### References:
