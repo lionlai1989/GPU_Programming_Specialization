@@ -4,14 +4,25 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/home/lai/GPU_Programming_Specialization/opencv-4.7.0/install_opencv/include/opencv4"
+                "/home/lai/GPU_Programming_Specialization/opencv-4.7.0/install_opencv/include/opencv4",
+                "/usr/local/cuda-11.8/include"
             ],
-            "defines": [],
+            "defines": [
+                "__CUDACC__",
+                "__CUDA_ARCH__=750"
+            ],
             "compilerPath": "/usr/bin/g++",
             "cStandard": "c17",
             "cppStandard": "c++17",
             "intelliSenseMode": "linux-gcc-x64",
-            "configurationProvider": "ms-vscode.cmake-tools"
+            "configurationProvider": "ms-vscode.cmake-tools",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}",
+                    "/usr/local/cuda-11.8/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
         }
     ],
     "version": 4
