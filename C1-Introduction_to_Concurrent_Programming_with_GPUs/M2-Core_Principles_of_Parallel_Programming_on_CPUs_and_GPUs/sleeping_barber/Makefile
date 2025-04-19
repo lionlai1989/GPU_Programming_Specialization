@@ -1,7 +1,7 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -pthread -Wall -Wextra
-TARGET = sleeping_barber
-SRC = sleeping_barber.cpp
+TARGET = main
+SRC = main.cpp
 
 .PHONY: all clean run
 

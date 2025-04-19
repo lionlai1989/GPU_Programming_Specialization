@@ -1,7 +1,7 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -pthread -Wall -Wextra
-TARGET = dining_philosophers
-SRC = dining_philosophers.cpp
+TARGET = main
+SRC = main.cpp
 
 .PHONY: all clean run
 
