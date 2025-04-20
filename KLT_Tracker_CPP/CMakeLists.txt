@@ -13,17 +13,21 @@ set(OpenCV_LIBS_DIR "/home/lai/GPU_Programming_Specialization/opencv-4.7.0/insta
 # Find OpenCV package with required components
 find_package(OpenCV REQUIRED COMPONENTS core highgui imgproc video)
 
-# Add executable
-add_executable(KLT_Tracker_CPP main.cpp)
+# Add executables for both tracker implementations
+add_executable(klt_tracker_basic tracker_basic.cpp)
+add_executable(klt_tracker_opencv tracker_opencv.cpp)
 
-# Link OpenCV libraries
-target_link_directories(KLT_Tracker_CPP PRIVATE ${OpenCV_LIBS_DIR})
-target_link_libraries(KLT_Tracker_CPP 
-    opencv_core
-    opencv_highgui
-    opencv_imgproc
-    opencv_video
-)
+# Common OpenCV configuration for both executables
+foreach(target klt_tracker_basic klt_tracker_opencv)
+    # Link OpenCV libraries
+    target_link_directories(${target} PRIVATE ${OpenCV_LIBS_DIR})
+    target_link_libraries(${target} 
+        opencv_core
+        opencv_highgui
+        opencv_imgproc
+        opencv_video
+    )
 
-# Include OpenCV directories
-target_include_directories(KLT_Tracker_CPP PRIVATE ${OpenCV_INCLUDE_DIRS})
+    # Include OpenCV directories
+    target_include_directories(${target} PRIVATE ${OpenCV_INCLUDE_DIRS})
+endforeach()
