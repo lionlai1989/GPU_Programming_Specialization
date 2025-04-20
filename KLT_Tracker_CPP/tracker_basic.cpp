@@ -101,6 +101,7 @@ void calcOpticalFlowPyrLK(const cv::Mat &prevImg, const cv::Mat &nextImg, const 
     buildPyramid(prevImg, prevPyr, maxLevel);
     buildPyramid(nextImg, nextPyr, maxLevel);
 
+    std::cout << "prevPyr.size(): " << prevPyr.size() << std::endl;
     // Pre-allocate matrices for derivatives
     cv::Mat Ix, Iy, It;
 
@@ -119,12 +120,15 @@ void calcOpticalFlowPyrLK(const cv::Mat &prevImg, const cv::Mat &nextImg, const 
         computeSpatialDeriv(I0, Ix, Iy);
 
         for (size_t i = 0; i < p0.size(); ++i) {
-            if (!status[i])
+            if (!status[i]) {
+                std::exit(1);
                 continue;
+            }
 
             cv::Point2f pt = p1[i];
             if (!isValidPoint(pt, I0, hw)) {
                 status[i] = 0;
+                std::exit(1);
                 continue;
             }
 
