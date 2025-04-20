@@ -14,13 +14,19 @@
 #include <sstream>
 #include <vector>
 
-// Function to build image pyramid
+// Function to build image pyramid with proper border handling
 void buildPyramid(const cv::Mat &img, std::vector<cv::Mat> &pyramid, int maxLevel) {
     pyramid.clear();
     pyramid.push_back(img);
+
+    // Add border for proper derivative computation
+    cv::Mat temp;
+    cv::copyMakeBorder(img, temp, 1, 1, 1, 1, cv::BORDER_REPLICATE);
+
     for (int l = 1; l <= maxLevel; ++l) {
         cv::Mat down;
         cv::pyrDown(pyramid[l - 1], down);
+        cv::copyMakeBorder(down, temp, 1, 1, 1, 1, cv::BORDER_REPLICATE);
         pyramid.push_back(down);
     }
 }
@@ -35,14 +41,17 @@ std::vector<cv::Point2f> scalePoints(const std::vector<cv::Point2f> &points, flo
     return scaled;
 }
 
-// Function to compute spatial derivatives
-void computeDerivatives(const cv::Mat &img, cv::Mat &Ix, cv::Mat &Iy) {
+// Function to compute Scharr derivatives
+void computeScharrDeriv(const cv::Mat &img, cv::Mat &Ix, cv::Mat &Iy) {
     cv::Mat f;
     img.convertTo(f, CV_32F, 1.0 / 255.0);
-    // Pre-smoothing for better gradient estimation
-    cv::GaussianBlur(f, f, cv::Size(5, 5), 1.0, 1.0, cv::BORDER_REPLICATE);
-    cv::Sobel(f, Ix, CV_32F, 1, 0, 3, 1, 0, cv::BORDER_REPLICATE);
-    cv::Sobel(f, Iy, CV_32F, 0, 1, 3, 1, 0, cv::BORDER_REPLICATE);
+
+    // Scharr kernels for better derivative estimation
+    cv::Mat scharr_x = (cv::Mat_<float>(3, 3) << -3, 0, 3, -10, 0, 10, -3, 0, 3);
+    cv::Mat scharr_y = (cv::Mat_<float>(3, 3) << -3, -10, -3, 0, 0, 0, 3, 10, 3);
+
+    cv::filter2D(f, Ix, CV_32F, scharr_x);
+    cv::filter2D(f, Iy, CV_32F, scharr_y);
 }
 
 // Function to compute temporal derivative
@@ -69,11 +78,6 @@ void calcOpticalFlowPyrLK(const std::vector<cv::Mat> &prevPyr, const std::vector
     status.assign(prevPts.size(), 1);
     err.assign(prevPts.size(), 0.f);
 
-    // Forward tracking
-    std::vector<cv::Point2f> forwardPts = nextPts;
-    std::vector<uchar> forwardStatus = status;
-    std::vector<float> forwardErr = err;
-
     // Loop from coarsest to finest
     for (int level = maxLevel; level >= 0; --level) {
         float scale = 1.f / float(1 << level);
@@ -84,6 +88,11 @@ void calcOpticalFlowPyrLK(const std::vector<cv::Mat> &prevPyr, const std::vector
 
         const cv::Mat &I0 = prevPyr[level];
         const cv::Mat &I1 = nextPyr[level];
+
+        // Compute derivatives for this level
+        cv::Mat Ix, Iy, It;
+        computeScharrDeriv(I0, Ix, Iy);
+        computeTemporalDerivative(I0, I1, It);
 
         for (size_t i = 0; i < p0.size(); ++i) {
             if (!status[i])
@@ -103,27 +112,24 @@ void calcOpticalFlowPyrLK(const std::vector<cv::Mat> &prevPyr, const std::vector
                 int cy = int(std::round(iy0));
                 cv::Rect roi(cx - hw, cy - hw, windowSize, windowSize);
 
-                // Safety
                 if ((roi & cv::Rect(0, 0, I0.cols, I0.rows)) != roi) {
                     status[i] = 0;
                     break;
                 }
 
-                cv::Mat T = I0(roi), S = I1(roi);
-                cv::Mat Ix, Iy, Itm;
-                computeDerivatives(T, Ix, Iy);
-                computeTemporalDerivative(T, S, Itm);
-
                 // Build normal equations
                 float A11 = 0, A12 = 0, A22 = 0, b1 = 0, b2 = 0;
                 for (int r = 0; r < windowSize; ++r) {
                     for (int c = 0; c < windowSize; ++c) {
-                        float ix = Ix.at<float>(r, c), iy = Iy.at<float>(r, c), itv = Itm.at<float>(r, c);
+                        float ix = Ix.at<float>(cy - hw + r, cx - hw + c);
+                        float iy = Iy.at<float>(cy - hw + r, cx - hw + c);
+                        float it = It.at<float>(cy - hw + r, cx - hw + c);
+
                         A11 += ix * ix;
                         A12 += ix * iy;
                         A22 += iy * iy;
-                        b1 += ix * itv;
-                        b2 += iy * itv;
+                        b1 += ix * it;
+                        b2 += iy * it;
                     }
                 }
 
@@ -144,95 +150,8 @@ void calcOpticalFlowPyrLK(const std::vector<cv::Mat> &prevPyr, const std::vector
                     break;
             }
 
-            // Save forward tracking result
-            forwardPts[i] = cv::Point2f(ix0, iy0) * float(1 << level);
-        }
-    }
-
-    // Backward tracking
-    std::vector<cv::Point2f> backwardPts = forwardPts;
-    std::vector<uchar> backwardStatus = status;
-
-    for (int level = maxLevel; level >= 0; --level) {
-        float scale = 1.f / float(1 << level);
-        std::vector<cv::Point2f> p1 = scalePoints(forwardPts, scale);
-        std::vector<cv::Point2f> p0 = scalePoints(prevPts, scale);
-
-        const cv::Mat &I1 = nextPyr[level];
-        const cv::Mat &I0 = prevPyr[level];
-
-        for (size_t i = 0; i < p1.size(); ++i) {
-            if (!backwardStatus[i])
-                continue;
-
-            cv::Point2f pt = p1[i];
-            if (!isValidPoint(pt, I1, hw)) {
-                backwardStatus[i] = 0;
-                continue;
-            }
-
-            float ix0 = pt.x, iy0 = pt.y;
-
-            for (int it = 0; it < maxIter; ++it) {
-                int cx = int(std::round(ix0));
-                int cy = int(std::round(iy0));
-                cv::Rect roi(cx - hw, cy - hw, windowSize, windowSize);
-
-                if ((roi & cv::Rect(0, 0, I1.cols, I1.rows)) != roi) {
-                    backwardStatus[i] = 0;
-                    break;
-                }
-
-                cv::Mat T = I1(roi), S = I0(roi);
-                cv::Mat Ix, Iy, Itm;
-                computeDerivatives(T, Ix, Iy);
-                computeTemporalDerivative(T, S, Itm);
-
-                float A11 = 0, A12 = 0, A22 = 0, b1 = 0, b2 = 0;
-                for (int r = 0; r < windowSize; ++r) {
-                    for (int c = 0; c < windowSize; ++c) {
-                        float ix = Ix.at<float>(r, c), iy = Iy.at<float>(r, c), itv = Itm.at<float>(r, c);
-                        A11 += ix * ix;
-                        A12 += ix * iy;
-                        A22 += iy * iy;
-                        b1 += ix * itv;
-                        b2 += iy * itv;
-                    }
-                }
-
-                float det = A11 * A22 - A12 * A12;
-                if (det < FLT_EPSILON) {
-                    backwardStatus[i] = 0;
-                    break;
-                }
-
-                float dx = (A22 * b1 - A12 * b2) / det;
-                float dy = (-A12 * b1 + A11 * b2) / det;
-
-                ix0 += dx;
-                iy0 += dy;
-
-                if (std::sqrt(dx * dx + dy * dy) < epsilon)
-                    break;
-            }
-
-            backwardPts[i] = cv::Point2f(ix0, iy0) * float(1 << level);
-        }
-    }
-
-    // Forward-backward consistency check
-    const float fbThreshold = 1.0f; // 1 pixel threshold
-    for (size_t i = 0; i < prevPts.size(); ++i) {
-        if (status[i] && backwardStatus[i]) {
-            float fbError = cv::norm(backwardPts[i] - prevPts[i]);
-            if (fbError > fbThreshold) {
-                status[i] = 0;
-            } else {
-                nextPts[i] = forwardPts[i];
-                err[i] = fbError;
-            }
-        } else {
-            status[i] = 0;
+            // Save tracking result
+            nextPts[i] = cv::Point2f(ix0, iy0) * float(1 << level);
         }
     }
 }
@@ -263,11 +182,14 @@ int main(int argc, char **argv) {
     cv::cvtColor(prevFrame, prevFrameGray, cv::COLOR_BGR2GRAY);
 
     // KLT parameters
-    const int maxLevel = 3; // pyramid levels
-    const int windowSize = 31;
+    const int maxLevel = 3;    // pyramid levels
+    const int windowSize = 31; // Larger window for more stable tracking
     const int halfWindow = windowSize / 2;
     const int maxIter = 30;
     const float epsilon = 1e-2;
+
+    // Forward-backward tracking parameters
+    const float fbThreshold = 2.0f; // Increased threshold to 2 pixels
 
     // manually select the points and assign them to prevPts
     std::vector<cv::Point2f> prevPts;
@@ -319,9 +241,42 @@ int main(int argc, char **argv) {
             buildPyramid(prevFrameGray, prevPyr, maxLevel);
             buildPyramid(frameGray, nextPyr, maxLevel);
 
-            // Track points
+            // forward tracking
             calcOpticalFlowPyrLK(prevPyr, nextPyr, prevPts, nextPts, status, err, maxLevel, maxIter, epsilon,
                                  windowSize);
+
+            // Store forward tracking results
+            std::vector<cv::Point2f> forwardPts = nextPts;
+            std::vector<uchar> forwardStatus = status;
+
+            // backward tracking
+            std::vector<cv::Point2f> backwardPts = prevPts;
+            std::vector<uchar> backwardStatus = status;
+            calcOpticalFlowPyrLK(nextPyr, prevPyr, forwardPts, backwardPts, backwardStatus, err, maxLevel, maxIter,
+                                 epsilon, windowSize);
+
+            // forward-backward consistency check
+            const float fbThreshold = 2.0f;
+            std::cout << "\nForward-Backward Check:" << std::endl;
+            for (size_t i = 0; i < prevPts.size(); ++i) {
+                if (forwardStatus[i] && backwardStatus[i]) {
+                    float fbError = cv::norm(backwardPts[i] - prevPts[i]);
+                    std::cout << "Point " << i << " FB error: " << fbError << std::endl;
+                    if (fbError > fbThreshold) {
+                        status[i] = 0;
+                        std::cout << "Point " << i << " failed FB check" << std::endl;
+                    } else {
+                        nextPts[i] = forwardPts[i];
+                        std::cout << "Point " << i << " passed FB check" << std::endl;
+                    }
+                } else {
+                    status[i] = 0;
+                    if (!forwardStatus[i])
+                        std::cout << "Point " << i << " failed forward tracking" << std::endl;
+                    if (!backwardStatus[i])
+                        std::cout << "Point " << i << " failed backward tracking" << std::endl;
+                }
+            }
 
             // Debug prints
             std::cout << "\nFrame " << frameCount << ":" << std::endl;
