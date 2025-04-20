@@ -41,7 +41,6 @@ int main(int argc, char **argv) {
     // KLT parameters
     const int maxLevel = 3; // pyramid levels
     const cv::Size winSize(15, 15);
-    const int maxCount = 3; // maximum number of points to track
     const cv::TermCriteria termcrit(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 20, 0.03);
 
     // manually select the points and assign them to prevPts
