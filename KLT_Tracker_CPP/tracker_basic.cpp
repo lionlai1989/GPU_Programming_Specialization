@@ -82,14 +82,24 @@ void computeNormalEquations(const cv::Mat &Ix, const cv::Mat &Iy, const cv::Mat 
 }
 
 // Function to track points using Lucas-Kanade algorithm with pyramids
-void calcOpticalFlowPyrLK(const std::vector<cv::Mat> &prevPyr, const std::vector<cv::Mat> &nextPyr,
-                          const std::vector<cv::Point2f> &prevPts, std::vector<cv::Point2f> &nextPts,
-                          std::vector<uchar> &status, std::vector<float> &err, int maxLevel = 3, int maxIter = 20,
-                          float epsilon = 0.03, int windowSize = 15) {
-    const int hw = windowSize / 2;
+void calcOpticalFlowPyrLK(const cv::Mat &prevImg, const cv::Mat &nextImg, const std::vector<cv::Point2f> &prevPts,
+                          std::vector<cv::Point2f> &nextPts, std::vector<uchar> &status, std::vector<float> &err,
+                          cv::Size winSize = cv::Size(15, 15), int maxLevel = 3,
+                          cv::TermCriteria criteria = cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS,
+                                                                       20, 0.03)) {
+    const int hw = winSize.width / 2;
     nextPts = prevPts;
     status.assign(prevPts.size(), 1);
     err.assign(prevPts.size(), 0.f);
+
+    // Extract parameters from criteria
+    int maxIter = criteria.maxCount;
+    float epsilon = criteria.epsilon;
+
+    // Build pyramids
+    std::vector<cv::Mat> prevPyr, nextPyr;
+    buildPyramid(prevImg, prevPyr, maxLevel);
+    buildPyramid(nextImg, nextPyr, maxLevel);
 
     // Pre-allocate matrices for derivatives
     cv::Mat Ix, Iy, It;
@@ -132,17 +142,15 @@ void calcOpticalFlowPyrLK(const std::vector<cv::Mat> &prevPyr, const std::vector
                 }
 
                 // Extract patches
-                cv::getRectSubPix(I0, cv::Size(windowSize, windowSize), cv::Point2f(ix0, iy0), patchI0);
-                cv::getRectSubPix(I1, cv::Size(windowSize, windowSize), cv::Point2f(ix0, iy0), patchI1);
-                cv::getRectSubPix(Ix, cv::Size(windowSize, windowSize), cv::Point2f(ix0, iy0), patchIx);
-                cv::getRectSubPix(Iy, cv::Size(windowSize, windowSize), cv::Point2f(ix0, iy0), patchIy);
+                cv::getRectSubPix(I0, winSize, cv::Point2f(ix0, iy0), patchI0);
+                cv::getRectSubPix(I1, winSize, cv::Point2f(ix0, iy0), patchI1);
+                cv::getRectSubPix(Ix, winSize, cv::Point2f(ix0, iy0), patchIx);
+                cv::getRectSubPix(Iy, winSize, cv::Point2f(ix0, iy0), patchIy);
 
                 // Verify patch sizes
                 if (patchI0.empty() || patchI1.empty() || patchIx.empty() || patchIy.empty() ||
-                    patchI0.size() != cv::Size(windowSize, windowSize) ||
-                    patchI1.size() != cv::Size(windowSize, windowSize) ||
-                    patchIx.size() != cv::Size(windowSize, windowSize) ||
-                    patchIy.size() != cv::Size(windowSize, windowSize)) {
+                    patchI0.size() != winSize || patchI1.size() != winSize || patchIx.size() != winSize ||
+                    patchIy.size() != winSize) {
                     status[i] = 0;
                     break;
                 }
@@ -203,11 +211,9 @@ int main(int argc, char **argv) {
     cv::cvtColor(prevFrame, prevFrameGray, cv::COLOR_BGR2GRAY);
 
     // KLT parameters
-    const int maxLevel = 3;    // pyramid levels
-    const int windowSize = 15; // Smaller window size to match OpenCV
-    const int halfWindow = windowSize / 2;
-    const int maxIter = 20;     // Match OpenCV's maxCount
-    const float epsilon = 0.03; // Match OpenCV's epsilon
+    const int maxLevel = 3; // pyramid levels
+    const cv::Size winSize(15, 15);
+    const cv::TermCriteria termcrit(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 20, 0.03);
 
     // manually select the points and assign them to prevPts
     std::vector<cv::Point2f> prevPts;
@@ -254,14 +260,8 @@ int main(int argc, char **argv) {
         cv::cvtColor(frame, frameGray, cv::COLOR_BGR2GRAY);
 
         if (!prevPts.empty()) {
-            // Build pyramids
-            std::vector<cv::Mat> prevPyr, nextPyr;
-            buildPyramid(prevFrameGray, prevPyr, maxLevel);
-            buildPyramid(frameGray, nextPyr, maxLevel);
-
-            // forward tracking only
-            calcOpticalFlowPyrLK(prevPyr, nextPyr, prevPts, nextPts, status, err, maxLevel, maxIter, epsilon,
-                                 windowSize);
+            // Track points using our KLT tracker
+            calcOpticalFlowPyrLK(prevFrameGray, frameGray, prevPts, nextPts, status, err, winSize, maxLevel, termcrit);
 
             // Debug prints
             std::cout << "\nFrame " << frameCount << ":" << std::endl;
