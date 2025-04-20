@@ -263,22 +263,14 @@ int main(int argc, char **argv) {
             // Track points using our KLT tracker
             calcOpticalFlowPyrLK(prevFrameGray, frameGray, prevPts, nextPts, status, err, winSize, maxLevel, termcrit);
 
-            // Debug prints
-            std::cout << "\nFrame " << frameCount << ":" << std::endl;
-            std::cout << "Status: ";
-            for (size_t i = 0; i < status.size(); ++i) {
-                std::cout << (int)status[i] << " ";
-            }
-            std::cout << std::endl;
+            std::cout << "nextPts.size(): " << nextPts.size() << std::endl;
 
             // Update tracking history and status
             for (size_t i = 0; i < prevPts.size(); ++i) {
-                if (status[i]) {
+                if (status[i] && pointActive[i]) {
                     trackedPoints[i].push_back(nextPts[i]);
-                    std::cout << "Point " << i << " tracked. History size: " << trackedPoints[i].size() << std::endl;
                 } else {
-                    pointActive[i] = false;
-                    std::cout << "Point " << i << " lost." << std::endl;
+                    pointActive[i] = false; // Mark point as lost
                 }
             }
 
@@ -287,6 +279,8 @@ int main(int argc, char **argv) {
 
             // Draw paths and current points
             for (size_t i = 0; i < trackedPoints.size(); ++i) {
+                std::cout << "trackedPoints[i].size(): " << trackedPoints[i].size() << std::endl;
+
                 if (trackedPoints[i].size() > 1) {
                     // Draw the path
                     for (size_t j = 1; j < trackedPoints[i].size(); ++j) {
@@ -324,9 +318,6 @@ int main(int argc, char **argv) {
         }
 
         frameCount++;
-
-        if (frameCount > 50)
-            break;
     }
 
     cap.release();
