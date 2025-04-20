@@ -7,6 +7,7 @@ All code is tested on **Ubuntu 22.04**, with **CUDA 11.8** and **OpenCV 4.7.0**.
 ## KLT Tracker with CUDA from scratch
 
 I use CUDA libraries build a KLT tracker from scratch.
+[Video by 杉原 桂 from Pexels](https://www.pexels.com/video/an-airplane-taking-off-2658998/)
 
 ## Prerequisites
 
@@ -37,6 +38,7 @@ cd opencv-4.7.0
 # Build and install
 rm -rf build/ \
 && cmake -S . -B build/ \
+      -GNinja \
       -DCMAKE_INSTALL_PREFIX=./install_opencv \
       -DCMAKE_BUILD_TYPE=RELEASE \
       -DWITH_CUDA=ON \
