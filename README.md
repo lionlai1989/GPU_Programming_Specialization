@@ -1,42 +1,31 @@
-# GPU_Programming_Specialization
+# GPU Programming Specialization
 
-this repository has my study notes for the course, GPU Programming Specialization, offered by johns hopkins university and coursera.
+This repo contains my study notes for the **GPU Programming Specialization** offered by Johns Hopkins University on Coursera.
 
-All the code can be compiled and run if you have already set up the environment. all code has beend tested on ubuntu22.04 cuda 11.8 and opencv4.7.0. 
+All code is tested on **Ubuntu 22.04**, with **CUDA 11.8** and **OpenCV 4.7.0**.
 
-## Description
-// please fill in this part
-### Introduction to Concurrent Programming with GPUs
-// please fill in this part
+## KLT Tracker with CUDA from scratch
 
-### Introduction to Parallel Programming with CUDA
-// please fill in this part
-
-### CUDA at Scale for the Enterprise
-// please fill in this part
-
-### CUDA Advanced Libraries
-// please fill in this part
-
-### KLT Tracker with CUDA from scratch
-// please fill in this part
+I use CUDA libraries build a KLT tracker from scratch.
 
 ## Prerequisites
-  
-### install cuda toolkit
+
+### CUDA Toolkit 11.8
+
+Make sure CUDA is installed and environment variables are set:
+
 ```bash
-# CUDA
 export PATH=/usr/local/cuda-11.8/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH
 ```
 
-### Install OpenCV 4.7.0 with FFMPEG and CUDA support:
+### OpenCV 4.7.0 (with FFMPEG + CUDA support)
 
 ```bash
-# Install FFMPEG development libraries
+# Install FFMPEG and dependencies
 sudo apt update && sudo apt install -y libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libgtk2.0-dev libcanberra-gtk-module
 
-# Download OpenCV and opencv_contrib
+# Download opencv and opencv_contrib
 wget -O opencv.zip https://github.com/opencv/opencv/archive/refs/tags/4.7.0.zip \
 && wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/refs/tags/4.7.0.zip
 
@@ -45,10 +34,9 @@ unzip opencv.zip && unzip opencv_contrib.zip
 
 cd opencv-4.7.0
 
-# Configure and build OpenCV with FFMPEG and CUDA support
+# Build and install
 rm -rf build/ \
 && cmake -S . -B build/ \
-      -GNinja \
       -DCMAKE_INSTALL_PREFIX=./install_opencv \
       -DCMAKE_BUILD_TYPE=RELEASE \
       -DWITH_CUDA=ON \
@@ -66,3 +54,17 @@ rm -rf build/ \
       -DBUILD_LIST=core,cudev,imgproc,imgcodecs,videoio,highgui,video \
 && cmake --build build/ --parallel $(nproc) && cmake --install build/
 ```
+
+## Course Description
+// please fill in this part
+### Introduction to Concurrent Programming with GPUs
+// please fill in this part
+
+### Introduction to Parallel Programming with CUDA
+// please fill in this part
+
+### CUDA at Scale for the Enterprise
+// please fill in this part
+
+### CUDA Advanced Libraries
+// please fill in this part
