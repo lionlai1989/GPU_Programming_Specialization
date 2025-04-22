@@ -60,15 +60,14 @@ rm -rf build/ \
 ```
 
 ## Course Description
-// please fill in this part
+
 ### Introduction to Concurrent Programming with GPUs
-// please fill in this part
+
 
 ### Introduction to Parallel Programming with CUDA
-// please fill in this part
+
 
 ### CUDA at Scale for the Enterprise
-// please fill in this part
+
 
 ### CUDA Advanced Libraries
-// please fill in this part
