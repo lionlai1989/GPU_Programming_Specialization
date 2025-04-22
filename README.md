@@ -4,7 +4,9 @@ This repo contains my study notes for the **GPU Programming Specialization** off
 
 All code is tested on **Ubuntu 22.04**, with **CUDA 11.8** and **OpenCV 4.7.0**.
 
-## KLT Tracker with CUDA from scratch
+## Canny Edge Detector with CUDA from scratch
+
+![Video Comparison](./Canny_Edge_CUDA/combine.gif)
 
 <!-- I use CUDA libraries build a KLT tracker from scratch.
 [Video by 杉原 桂 from Pexels](https://www.pexels.com/video/an-airplane-taking-off-2658998/) -->
