@@ -93,6 +93,8 @@ class Philosopher {
         std::cout << name << " starts eating (meal " << eat_count << ").\n";
         std::this_thread::sleep_for(std::chrono::seconds(dist(random_gen)));
         std::cout << name << " finishes eating and leaves to think.\n";
+
+        // scoped_lock automatically unlock in its destructor.
     }
 
     const std::string &getName() const { return name; }
