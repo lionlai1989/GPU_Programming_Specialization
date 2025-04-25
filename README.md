@@ -66,6 +66,8 @@ This specialization explores GPU programming using CUDA.
 
 All programming exercises in the course have been significantly **modified or rewritten** by me.
 
+All the code can be run with `make all`.
+
 ### Introduction to Concurrent Programming with GPUs
 
 ### Introduction to Parallel Programming with CUDA

@@ -107,7 +107,8 @@
         "__tree": "cpp",
         "execution": "cpp",
         "queue": "cpp",
-        "stack": "cpp"
+        "stack": "cpp",
+        "__nullptr": "cpp"
     },
     "cmake.sourceDirectory": "/home/lai/GPU_Programming_Specialization/Canny_Edge_CUDA"
 }
