@@ -211,10 +211,42 @@ void apply_hysteresis_thresholding(Npp8u *d_edge_map, const Npp16s *d_suppress_m
     CUDA_CHECK(cudaDeviceSynchronize());
 }
 
+__global__ void bgr_to_rgb(Npp8u *src, Npp8u *dst, size_t srcStep, size_t dstStep, int width, int height) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= width || y >= height)
+        return;
+    int idx = y * srcStep + x;
+    dst[y * dstStep + x] = src[idx];
+}
+
+void apply_bgr_to_rgb(Npp8u *src, Npp8u *dst, size_t srcStep, size_t dstStep, int width, int height) {
+    dim3 block(32, 32);
+    dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
+    bgr_to_rgb<<<grid, block>>>(src, dst, srcStep, dstStep, width, height);
+}
+
 cv::Mat process_image(const cv::Mat &input_bgr) {
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    Npp8u *d_src = nullptr, *d_dst = nullptr;
+    apply_bgr_to_rgb(input_bgr.data, d_src, input_bgr.step[0], input_rgb.step[0], input_bgr.cols, input_bgr.rows);
+    size_t srcStepBytes = input_bgr.step[0];
+    size_t dstStepBytes = input_rgb.step[0];
+    CUDA_CHECK(cudaMalloc(&d_src, height * srcStepBytes));
+    CUDA_CHECK(cudaMalloc(&d_dst, height * dstStepBytes));
+
+    cudaEventRecord(start, 0);
     // Convert BGR to RGB (NPP expects RGB order)
     cv::Mat input_rgb;
     cv::cvtColor(input_bgr, input_rgb, cv::COLOR_BGR2RGB);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "cvtColor Time taken: " << milliseconds << " milliseconds" << std::endl;
 
     // Get image dimensions and verify format
     int width = input_rgb.cols;
@@ -243,6 +275,8 @@ cv::Mat process_image(const cv::Mat &input_bgr) {
     // Copy RGB image to device
     CUDA_CHECK(cudaMemcpy(d_src, input_rgb.data, height * srcStepBytes, cudaMemcpyHostToDevice));
 
+    cudaEventRecord(start, 0);
+
     // Convert RGB to Grayscale
     NppiSize roiSize = {width, height};
     NppStatus status = nppiRGBToGray_8u_C3C1R(d_src,         // source pointer
@@ -252,12 +286,21 @@ cv::Mat process_image(const cv::Mat &input_bgr) {
                                               roiSize        // ROI size
     );
     NPP_CHECK(status);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "nppiRGBToGray_8u_C3C1R Time taken: " << milliseconds << " milliseconds" << std::endl;
 
     constexpr int kernelSize = 11;
     constexpr int kernelRadius = kernelSize / 2;
     constexpr Npp32s target_sum = 256;
     Npp32s normalized_kernel[kernelSize * kernelSize];
+    cudaEventRecord(start, 0);
     get_normalized_kernel(normalized_kernel, target_sum);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "get_normalized_kernel Time taken: " << milliseconds << " milliseconds" << std::endl;
 
     // Allocate device memory for kernel
     Npp32s *d_kernel = nullptr;
@@ -271,6 +314,7 @@ cv::Mat process_image(const cv::Mat &input_bgr) {
     NppiPoint oAnchor = {kernelRadius, kernelRadius}; // Center of the kernel
     NppiSize oKernelSize = {kernelSize, kernelSize};
 
+    cudaEventRecord(start, 0);
     status = nppiFilterBorder_8u_C1R(d_gray,              // pSrc
                                      grayStepBytes,       // nSrcStep
                                      roi,                 // oSrcSize
@@ -285,7 +329,12 @@ cv::Mat process_image(const cv::Mat &input_bgr) {
                                      NPP_BORDER_REPLICATE // eBorderType
     );
     NPP_CHECK(status);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "nppiFilterBorder_8u_C1R Time taken: " << milliseconds << " milliseconds" << std::endl;
 
+    cudaEventRecord(start, 0);
     Npp16s *d_magnitude = nullptr;
     Npp32f *d_direction = nullptr;
     size_t magStep = width * sizeof(Npp16s);
@@ -293,6 +342,10 @@ cv::Mat process_image(const cv::Mat &input_bgr) {
     CUDA_CHECK(cudaMalloc(&d_magnitude, height * magStep));
     CUDA_CHECK(cudaMalloc(&d_direction, height * angStep));
     apply_sobel_filter(d_blur, grayStepBytes, width, height, d_magnitude, d_direction, 3);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "apply_sobel_filter Time taken: " << milliseconds << " milliseconds" << std::endl;
     /**
      * Debug d_magnitude. Convert 16s to 8u.
      * cv::Mat h_magnitude(height, width, CV_16SC1);
@@ -304,11 +357,21 @@ cv::Mat process_image(const cv::Mat &input_bgr) {
 
     Npp16s *d_suppress_magnitude = nullptr;
     CUDA_CHECK(cudaMalloc(&d_suppress_magnitude, height * magStep));
+    cudaEventRecord(start, 0);
     apply_non_max_suppression(d_suppress_magnitude, d_magnitude, d_direction, magStep, angStep, width, height);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "apply_non_max_suppression Time taken: " << milliseconds << " milliseconds" << std::endl;
 
     Npp8u *d_edge_map = nullptr;
     CUDA_CHECK(cudaMalloc(&d_edge_map, height * width * sizeof(Npp8u)));
+    cudaEventRecord(start, 0);
     apply_hysteresis_thresholding(d_edge_map, d_suppress_magnitude, width, height, 25, 100);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "apply_hysteresis_thresholding Time taken: " << milliseconds << " milliseconds" << std::endl;
 
     cv::Mat output_gray(height, width, CV_8UC1);
 
@@ -326,34 +389,11 @@ cv::Mat process_image(const cv::Mat &input_bgr) {
     return output_gray;
 }
 
-void print_usage(const char *program_name) {
-    std::cerr << "Usage: " << program_name << " -i <input_video> -o <output_video>\n"
-              << "Options:\n"
-              << "  -i <input_video>  Input video file (MP4)\n"
-              << "  -o <output_video> Output video file (MP4)\n";
-}
-
 int main(int argc, char *argv[]) {
-    std::string input_file;
-    std::string output_file;
-
-    int opt;
-    while ((opt = getopt(argc, argv, "i:o:")) != -1) {
-        switch (opt) {
-        case 'i':
-            input_file = optarg;
-            break;
-        case 'o':
-            output_file = optarg;
-            break;
-        default:
-            print_usage(argv[0]);
-            exit(EXIT_FAILURE);
-        }
-    }
+    std::string input_file{"data/me.mp4"};
+    std::string output_file{"canny_cuda.mp4"};
 
     if (input_file.empty() || output_file.empty()) {
-        print_usage(argv[0]);
         exit(EXIT_FAILURE);
     }
 
@@ -368,10 +408,6 @@ int main(int argc, char *argv[]) {
     int height = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
     double fps = cap.get(cv::CAP_PROP_FPS);
     int total_frames = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
-
-    // Create output directory if it doesn't exist
-    std::filesystem::path output_path(output_file);
-    std::filesystem::create_directories(output_path.parent_path());
 
     // Create video writer with H.264 codec
     cv::VideoWriter writer(output_file, cv::VideoWriter::fourcc('a', 'v', 'c', '1'), // H.264 codec
@@ -388,16 +424,20 @@ int main(int argc, char *argv[]) {
     // Process each frame
     cv::Mat frame;
     int frame_count = 0;
+    auto t1 = std::chrono::high_resolution_clock::now();
     while (cap.read(frame)) {
         cv::Mat processed_frame = process_image(frame);
 
         writer.write(processed_frame);
 
-        frame_count++;
-        if (frame_count % 10 == 0) {
-            std::cout << "Processed frame " << frame_count << " of " << total_frames << std::endl;
-        }
+        // frame_count++;
+        // if (frame_count % 10 == 0) {
+        //     std::cout << "Processed frame " << frame_count << " of " << total_frames << std::endl;
+        // }
     }
+    auto t2 = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    std::cout << "Time taken: " << duration.count() << " milliseconds" << std::endl;
 
     // Release resources
     cap.release();
