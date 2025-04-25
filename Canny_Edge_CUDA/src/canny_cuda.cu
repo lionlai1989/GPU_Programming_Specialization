@@ -211,182 +211,119 @@ void apply_hysteresis_thresholding(Npp8u *d_edge_map, const Npp16s *d_suppress_m
     CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void bgr_to_rgb(Npp8u *src, Npp8u *dst, size_t srcStep, size_t dstStep, int width, int height) {
+__global__ void bgr_to_gray(const unsigned char *src, unsigned char *dst, size_t srcPitch, size_t dstPitch, int width,
+                            int height) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height)
         return;
-    int idx = y * srcStep + x;
-    dst[y * dstStep + x] = src[idx];
+
+    // Row pointers using pitched memory
+    const unsigned char *rowSrc = src + y * srcPitch;
+    unsigned char *rowDst = dst + y * dstPitch;
+
+    // BGR channels are interleaved
+    int idx = 3 * x;
+    float b = rowSrc[idx + 0];
+    float g = rowSrc[idx + 1];
+    float r = rowSrc[idx + 2];
+
+    // Weighted sum; use fmaf for one‐pass FMA if you like
+    float gray = __fmaf_rn(r, 0.299f, __fmaf_rn(g, 0.587f, __fmul_rn(b, 0.114f)));
+    rowDst[x] = (unsigned char)(gray + 0.5f);
 }
 
-void apply_bgr_to_rgb(Npp8u *src, Npp8u *dst, size_t srcStep, size_t dstStep, int width, int height) {
+void apply_bgr_to_gray(Npp8u *src, Npp8u *dst, size_t srcStep, size_t dstStep, int width, int height) {
     dim3 block(32, 32);
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
-    bgr_to_rgb<<<grid, block>>>(src, dst, srcStep, dstStep, width, height);
+    bgr_to_gray<<<grid, block>>>(src, dst, srcStep, dstStep, width, height);
 }
 
-cv::Mat process_image(const cv::Mat &input_bgr) {
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+void process_image(const cv::Mat &input_bgr, cv::Mat &output_gray) {
 
-    Npp8u *d_src = nullptr, *d_dst = nullptr;
-    apply_bgr_to_rgb(input_bgr.data, d_src, input_bgr.step[0], input_rgb.step[0], input_bgr.cols, input_bgr.rows);
-    size_t srcStepBytes = input_bgr.step[0];
-    size_t dstStepBytes = input_rgb.step[0];
-    CUDA_CHECK(cudaMalloc(&d_src, height * srcStepBytes));
-    CUDA_CHECK(cudaMalloc(&d_dst, height * dstStepBytes));
+    int width = input_bgr.cols;
+    int height = input_bgr.rows;
+    int channels = input_bgr.channels();
+    size_t bgrStepBytes = input_bgr.step[0]; // bytes per row (with padding)
+    size_t gryStepBytes = width * sizeof(Npp8u);
 
-    cudaEventRecord(start, 0);
-    // Convert BGR to RGB (NPP expects RGB order)
-    cv::Mat input_rgb;
-    cv::cvtColor(input_bgr, input_rgb, cv::COLOR_BGR2RGB);
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "cvtColor Time taken: " << milliseconds << " milliseconds" << std::endl;
+    Npp8u *d_bgr = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_bgr, height * bgrStepBytes));
+    CUDA_CHECK(cudaMemcpy(d_bgr, input_bgr.data, height * bgrStepBytes, cudaMemcpyHostToDevice));
 
-    // Get image dimensions and verify format
-    int width = input_rgb.cols;
-    int height = input_rgb.rows;
-    int channels = input_rgb.channels();
-    if (channels != 3) {
-        std::cerr << "Error: Input image must be 3-channel RGB" << std::endl;
-        exit(EXIT_FAILURE);
-    }
+    Npp8u *d_gray = nullptr, *d_blur = nullptr;
 
-    // Allocate device memory
-    size_t srcStepBytes = input_rgb.step[0]; // bytes per row (with padding)
-    size_t grayStepBytes = width * sizeof(Npp8u);
+    CUDA_CHECK(cudaMalloc(&d_gray, height * gryStepBytes));
+    CUDA_CHECK(cudaMalloc(&d_blur, height * gryStepBytes));
 
-    Npp8u *d_src = nullptr, *d_gray = nullptr, *d_blur = nullptr;
+    apply_bgr_to_gray(d_bgr, d_gray, bgrStepBytes, gryStepBytes, width, height);
 
-    // Allocate device memory with error checking
-    CUDA_CHECK(cudaMalloc(&d_src, height * srcStepBytes));
-    CUDA_CHECK(cudaMalloc(&d_gray, height * grayStepBytes));
-    CUDA_CHECK(cudaMalloc(&d_blur, height * grayStepBytes));
-
-    // Initialize output buffers to zero
-    CUDA_CHECK(cudaMemset(d_gray, 0, height * grayStepBytes));
-    CUDA_CHECK(cudaMemset(d_blur, 0, height * grayStepBytes));
-
-    // Copy RGB image to device
-    CUDA_CHECK(cudaMemcpy(d_src, input_rgb.data, height * srcStepBytes, cudaMemcpyHostToDevice));
-
-    cudaEventRecord(start, 0);
-
-    // Convert RGB to Grayscale
-    NppiSize roiSize = {width, height};
-    NppStatus status = nppiRGBToGray_8u_C3C1R(d_src,         // source pointer
-                                              srcStepBytes,  // source stride in bytes
-                                              d_gray,        // destination pointer
-                                              grayStepBytes, // destination stride in bytes
-                                              roiSize        // ROI size
-    );
-    NPP_CHECK(status);
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "nppiRGBToGray_8u_C3C1R Time taken: " << milliseconds << " milliseconds" << std::endl;
-
+    // Apply Gaussian filter
     constexpr int kernelSize = 11;
     constexpr int kernelRadius = kernelSize / 2;
     constexpr Npp32s target_sum = 256;
     Npp32s normalized_kernel[kernelSize * kernelSize];
-    cudaEventRecord(start, 0);
     get_normalized_kernel(normalized_kernel, target_sum);
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "get_normalized_kernel Time taken: " << milliseconds << " milliseconds" << std::endl;
-
-    // Allocate device memory for kernel
     Npp32s *d_kernel = nullptr;
     CUDA_CHECK(cudaMalloc(&d_kernel, kernelSize * kernelSize * sizeof(Npp32s)));
     CUDA_CHECK(
         cudaMemcpy(d_kernel, normalized_kernel, kernelSize * kernelSize * sizeof(Npp32s), cudaMemcpyHostToDevice));
-
     // Apply custom Gaussian filter with border replication
-    NppiSize roi = {width, height};
+    NppiSize roiSize = {width, height};
     NppiPoint oSrcOffset = {0, 0};
     NppiPoint oAnchor = {kernelRadius, kernelRadius}; // Center of the kernel
     NppiSize oKernelSize = {kernelSize, kernelSize};
-
-    cudaEventRecord(start, 0);
-    status = nppiFilterBorder_8u_C1R(d_gray,              // pSrc
-                                     grayStepBytes,       // nSrcStep
-                                     roi,                 // oSrcSize
-                                     oSrcOffset,          // oSrcOffset
-                                     d_blur,              // pDst
-                                     grayStepBytes,       // nDstStep
-                                     roi,                 // oSizeROI
-                                     d_kernel,            // pKernel
-                                     oKernelSize,         // oKernelSize
-                                     oAnchor,             // oAnchor
-                                     target_sum,          // nDivisor
-                                     NPP_BORDER_REPLICATE // eBorderType
+    NppStatus status = nppiFilterBorder_8u_C1R(d_gray,              // pSrc
+                                               gryStepBytes,        // nSrcStep
+                                               roiSize,             // oSrcSize
+                                               oSrcOffset,          // oSrcOffset
+                                               d_blur,              // pDst
+                                               gryStepBytes,        // nDstStep
+                                               roiSize,             // oSizeROI
+                                               d_kernel,            // pKernel
+                                               oKernelSize,         // oKernelSize
+                                               oAnchor,             // oAnchor
+                                               target_sum,          // nDivisor
+                                               NPP_BORDER_REPLICATE // eBorderType
     );
     NPP_CHECK(status);
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "nppiFilterBorder_8u_C1R Time taken: " << milliseconds << " milliseconds" << std::endl;
 
-    cudaEventRecord(start, 0);
+    // Apply Sobel filter
     Npp16s *d_magnitude = nullptr;
     Npp32f *d_direction = nullptr;
     size_t magStep = width * sizeof(Npp16s);
     size_t angStep = width * sizeof(Npp32f);
     CUDA_CHECK(cudaMalloc(&d_magnitude, height * magStep));
     CUDA_CHECK(cudaMalloc(&d_direction, height * angStep));
-    apply_sobel_filter(d_blur, grayStepBytes, width, height, d_magnitude, d_direction, 3);
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "apply_sobel_filter Time taken: " << milliseconds << " milliseconds" << std::endl;
-    /**
-     * Debug d_magnitude. Convert 16s to 8u.
-     * cv::Mat h_magnitude(height, width, CV_16SC1);
-     * CUDA_CHECK(cudaMemcpy(h_magnitude.data, d_magnitude,
-     *                       height * h_magnitude.step[0],
-     *                       cudaMemcpyDeviceToHost));
-     * h_magnitude.convertTo(output_gray, CV_8UC1);
-     */
+
+    apply_sobel_filter(d_blur, gryStepBytes, width, height, d_magnitude, d_direction, 3);
+    // /**
+    //  * Debug d_magnitude. Convert 16s to 8u.
+    //  * cv::Mat h_magnitude(height, width, CV_16SC1);
+    //  * CUDA_CHECK(cudaMemcpy(h_magnitude.data, d_magnitude,
+    //  *                       height * h_magnitude.step[0],
+    //  *                       cudaMemcpyDeviceToHost));
+    //  * h_magnitude.convertTo(output_gray, CV_8UC1);
+    //  */
 
     Npp16s *d_suppress_magnitude = nullptr;
     CUDA_CHECK(cudaMalloc(&d_suppress_magnitude, height * magStep));
-    cudaEventRecord(start, 0);
     apply_non_max_suppression(d_suppress_magnitude, d_magnitude, d_direction, magStep, angStep, width, height);
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "apply_non_max_suppression Time taken: " << milliseconds << " milliseconds" << std::endl;
 
     Npp8u *d_edge_map = nullptr;
     CUDA_CHECK(cudaMalloc(&d_edge_map, height * width * sizeof(Npp8u)));
-    cudaEventRecord(start, 0);
     apply_hysteresis_thresholding(d_edge_map, d_suppress_magnitude, width, height, 25, 100);
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "apply_hysteresis_thresholding Time taken: " << milliseconds << " milliseconds" << std::endl;
-
-    cv::Mat output_gray(height, width, CV_8UC1);
 
     CUDA_CHECK(cudaMemcpy(output_gray.data, d_edge_map, height * output_gray.step[0], cudaMemcpyDeviceToHost));
 
-    cudaFree(d_src);
-    cudaFree(d_gray);
-    cudaFree(d_blur);
-    cudaFree(d_kernel);
-    cudaFree(d_magnitude);
-    cudaFree(d_direction);
-    cudaFree(d_suppress_magnitude);
-    cudaFree(d_edge_map);
-
-    return output_gray;
+    CUDA_CHECK(cudaFree(d_bgr));
+    CUDA_CHECK(cudaFree(d_gray));
+    CUDA_CHECK(cudaFree(d_blur));
+    CUDA_CHECK(cudaFree(d_kernel));
+    CUDA_CHECK(cudaFree(d_magnitude));
+    CUDA_CHECK(cudaFree(d_direction));
+    CUDA_CHECK(cudaFree(d_suppress_magnitude));
+    CUDA_CHECK(cudaFree(d_edge_map));
 }
 
 int main(int argc, char *argv[]) {
@@ -421,14 +358,14 @@ int main(int argc, char *argv[]) {
 
     std::cout << "Processing video: " << width << "x" << height << " @ " << fps << " fps" << std::endl;
 
-    // Process each frame
-    cv::Mat frame;
+    cv::Mat out_frame(height, width, CV_8UC1);
+    cv::Mat in_frame;
     int frame_count = 0;
     auto t1 = std::chrono::high_resolution_clock::now();
-    while (cap.read(frame)) {
-        cv::Mat processed_frame = process_image(frame);
+    while (cap.read(in_frame)) {
+        process_image(in_frame, out_frame);
 
-        writer.write(processed_frame);
+        writer.write(out_frame);
 
         // frame_count++;
         // if (frame_count % 10 == 0) {
