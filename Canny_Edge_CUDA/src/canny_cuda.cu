@@ -239,6 +239,39 @@ void apply_bgr_to_gray(Npp8u *src, Npp8u *dst, size_t srcStep, size_t dstStep, i
     bgr_to_gray<<<grid, block>>>(src, dst, srcStep, dstStep, width, height);
 }
 
+void apply_gaussian_filter(Npp8u *d_gray, Npp8u *d_blur, size_t srcStep, size_t dstStep, int width, int height) {
+    // Apply Gaussian filter
+    constexpr int kernelSize = 11;
+    constexpr int kernelRadius = kernelSize / 2;
+    constexpr Npp32s target_sum = 256;
+    Npp32s normalized_kernel[kernelSize * kernelSize];
+    get_normalized_kernel(normalized_kernel, target_sum);
+    Npp32s *d_kernel = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_kernel, kernelSize * kernelSize * sizeof(Npp32s)));
+    CUDA_CHECK(
+        cudaMemcpy(d_kernel, normalized_kernel, kernelSize * kernelSize * sizeof(Npp32s), cudaMemcpyHostToDevice));
+    // Apply custom Gaussian filter with border replication
+    NppiSize roiSize = {width, height};
+    NppiPoint oSrcOffset = {0, 0};
+    NppiPoint oAnchor = {kernelRadius, kernelRadius}; // Center of the kernel
+    NppiSize oKernelSize = {kernelSize, kernelSize};
+    NppStatus status = nppiFilterBorder_8u_C1R(d_gray,              // pSrc
+                                               srcStep,             // nSrcStep
+                                               roiSize,             // oSrcSize
+                                               oSrcOffset,          // oSrcOffset
+                                               d_blur,              // pDst
+                                               dstStep,             // nDstStep
+                                               roiSize,             // oSizeROI
+                                               d_kernel,            // pKernel
+                                               oKernelSize,         // oKernelSize
+                                               oAnchor,             // oAnchor
+                                               target_sum,          // nDivisor
+                                               NPP_BORDER_REPLICATE // eBorderType
+    );
+    NPP_CHECK(status);
+    CUDA_CHECK(cudaFree(d_kernel));
+}
+
 void process_image(const cv::Mat &input_bgr, cv::Mat &output_gray) {
 
     int width = input_bgr.cols;
@@ -258,35 +291,7 @@ void process_image(const cv::Mat &input_bgr, cv::Mat &output_gray) {
 
     apply_bgr_to_gray(d_bgr, d_gray, bgrStepBytes, gryStepBytes, width, height);
 
-    // Apply Gaussian filter
-    constexpr int kernelSize = 11;
-    constexpr int kernelRadius = kernelSize / 2;
-    constexpr Npp32s target_sum = 256;
-    Npp32s normalized_kernel[kernelSize * kernelSize];
-    get_normalized_kernel(normalized_kernel, target_sum);
-    Npp32s *d_kernel = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_kernel, kernelSize * kernelSize * sizeof(Npp32s)));
-    CUDA_CHECK(
-        cudaMemcpy(d_kernel, normalized_kernel, kernelSize * kernelSize * sizeof(Npp32s), cudaMemcpyHostToDevice));
-    // Apply custom Gaussian filter with border replication
-    NppiSize roiSize = {width, height};
-    NppiPoint oSrcOffset = {0, 0};
-    NppiPoint oAnchor = {kernelRadius, kernelRadius}; // Center of the kernel
-    NppiSize oKernelSize = {kernelSize, kernelSize};
-    NppStatus status = nppiFilterBorder_8u_C1R(d_gray,              // pSrc
-                                               gryStepBytes,        // nSrcStep
-                                               roiSize,             // oSrcSize
-                                               oSrcOffset,          // oSrcOffset
-                                               d_blur,              // pDst
-                                               gryStepBytes,        // nDstStep
-                                               roiSize,             // oSizeROI
-                                               d_kernel,            // pKernel
-                                               oKernelSize,         // oKernelSize
-                                               oAnchor,             // oAnchor
-                                               target_sum,          // nDivisor
-                                               NPP_BORDER_REPLICATE // eBorderType
-    );
-    NPP_CHECK(status);
+    apply_gaussian_filter(d_gray, d_blur, gryStepBytes, gryStepBytes, width, height);
 
     // Apply Sobel filter
     Npp16s *d_magnitude = nullptr;
@@ -297,14 +302,14 @@ void process_image(const cv::Mat &input_bgr, cv::Mat &output_gray) {
     CUDA_CHECK(cudaMalloc(&d_direction, height * angStep));
 
     apply_sobel_filter(d_blur, gryStepBytes, width, height, d_magnitude, d_direction, 3);
-    // /**
-    //  * Debug d_magnitude. Convert 16s to 8u.
-    //  * cv::Mat h_magnitude(height, width, CV_16SC1);
-    //  * CUDA_CHECK(cudaMemcpy(h_magnitude.data, d_magnitude,
-    //  *                       height * h_magnitude.step[0],
-    //  *                       cudaMemcpyDeviceToHost));
-    //  * h_magnitude.convertTo(output_gray, CV_8UC1);
-    //  */
+    /**
+     * Debug d_magnitude. Convert 16s to 8u.
+     * cv::Mat h_magnitude(height, width, CV_16SC1);
+     * CUDA_CHECK(cudaMemcpy(h_magnitude.data, d_magnitude,
+     *                       height * h_magnitude.step[0],
+     *                       cudaMemcpyDeviceToHost));
+     * h_magnitude.convertTo(output_gray, CV_8UC1);
+     */
 
     Npp16s *d_suppress_magnitude = nullptr;
     CUDA_CHECK(cudaMalloc(&d_suppress_magnitude, height * magStep));
@@ -319,7 +324,6 @@ void process_image(const cv::Mat &input_bgr, cv::Mat &output_gray) {
     CUDA_CHECK(cudaFree(d_bgr));
     CUDA_CHECK(cudaFree(d_gray));
     CUDA_CHECK(cudaFree(d_blur));
-    CUDA_CHECK(cudaFree(d_kernel));
     CUDA_CHECK(cudaFree(d_magnitude));
     CUDA_CHECK(cudaFree(d_direction));
     CUDA_CHECK(cudaFree(d_suppress_magnitude));
