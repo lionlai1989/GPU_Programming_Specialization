@@ -5,8 +5,8 @@
     "editor.insertSpaces": true,
     "editor.tabSize": 4,
     "files.associations": {
-        "*.cu": "cpp",
-        "*.cuh": "cpp",
+        "*.cu": "cuda-cpp",
+        "*.cuh": "cuda-cpp",
         "chrono": "cpp",
         "cctype": "cpp",
         "clocale": "cpp",
@@ -108,5 +108,6 @@
         "execution": "cpp",
         "queue": "cpp",
         "stack": "cpp"
-    }
+    },
+    "cmake.sourceDirectory": "/home/lai/GPU_Programming_Specialization/Canny_Edge_CUDA"
 }

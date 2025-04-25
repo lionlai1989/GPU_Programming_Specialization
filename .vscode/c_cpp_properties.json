@@ -11,7 +11,11 @@
                 "__CUDACC__",
                 "__CUDA_ARCH__=750"
             ],
-            "compilerPath": "/usr/bin/g++",
+            "compilerPath": "/usr/local/cuda-11.8/bin/nvcc",
+            "compilerArgs": [
+                "-x", "cuda",
+                "-arch=sm_86"
+            ],
             "cStandard": "c17",
             "cppStandard": "c++17",
             "intelliSenseMode": "linux-gcc-x64",
