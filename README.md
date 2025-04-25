@@ -1,8 +1,9 @@
 # GPU Programming Specialization
 
-This repo contains my study notes for the **GPU Programming Specialization** offered by Johns Hopkins University on Coursera.
+This repo contains my study notes for the course **GPU Programming
+Specialization** offered by Johns Hopkins University on Coursera.
 
-All code is tested on **Ubuntu 22.04**, with **CUDA 11.8** and **OpenCV 4.7.0**.
+All code is tested on **Ubuntu 22.04**, using **CUDA 11.8** and **OpenCV 4.7.0**.
 
 ## Canny Edge Detector with CUDA from scratch
 
@@ -59,15 +60,16 @@ rm -rf build/ \
 && cmake --build build/ --parallel $(nproc) && cmake --install build/
 ```
 
-## Course Description
+## Course Overview
+
+This specialization explores GPU programming using CUDA.
+
+All programming exercises in the course have been significantly **modified or rewritten** by me.
 
 ### Introduction to Concurrent Programming with GPUs
 
-
 ### Introduction to Parallel Programming with CUDA
 
-
 ### CUDA at Scale for the Enterprise
-
 
 ### CUDA Advanced Libraries
