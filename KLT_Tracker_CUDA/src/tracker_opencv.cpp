@@ -1,5 +1,5 @@
 /**
- * Use opencv's KLT tracker to track the points in the video. I manually select the tracking points in advance.
+ * Use OpenCV's KLT tracker to track the points in the video.
  *
  * Build and run:
  * rm -rf build/ && cmake -S . -B build/ && cmake --build build/ -j 4 && ./build/tracker_opencv 1920_1080_30fps.mp4
