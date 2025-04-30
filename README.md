@@ -1,18 +1,20 @@
 # GPU Programming Specialization
 
-This repo contains my study notes for the course **GPU Programming
-Specialization** offered by Johns Hopkins University on Coursera.
+This repository holds my study notes and hands-on projects for CUDA-based GPU programming. This covers:
 
-All code is tested on **Ubuntu 22.04**, using **CUDA 11.8** and **OpenCV 4.7.0**.
+- **GPU Programming Specialization** course by Johns Hopkins University  
+- Selected examples from various textbooks  
+- Canny Edge Detector and KLT Tracker with CUDA from scratch
 
 ## Canny Edge Detector with CUDA from scratch
 
-![Video Comparison](./Canny_Edge_CUDA/combine.gif)
+## KLT Tracker with CUDA from scratch
 
-<!-- I use CUDA libraries build a KLT tracker from scratch.
-[Video by 杉原 桂 from Pexels](https://www.pexels.com/video/an-airplane-taking-off-2658998/) -->
+[Video by 杉原 桂 from Pexels](https://www.pexels.com/video/an-airplane-taking-off-2658998/)
 
 ## Prerequisites
+
+All code is tested on **Ubuntu 22.04**, using **CUDA 11.8** and **OpenCV 4.7.0**.
 
 ### CUDA Toolkit 11.8
 
@@ -60,18 +62,6 @@ rm -rf build/ \
 && cmake --build build/ --parallel $(nproc) && cmake --install build/
 ```
 
-## Course Overview
+## Resources
 
-This specialization explores GPU programming using CUDA.
-
-All programming exercises in the course have been significantly **modified or rewritten** by me.
-
-All the code can be run with `make all`.
-
-### Introduction to Concurrent Programming with GPUs
-
-### Introduction to Parallel Programming with CUDA
-
-### CUDA at Scale for the Enterprise
-
-### CUDA Advanced Libraries
+- [GPU Programming Specialization offered by Johns Hopkins University]
