@@ -39,11 +39,11 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 
 # Add executables
-add_executable(canny_cuda src/canny_cuda.cu)
+add_executable(canny_cuda_naive src/canny_cuda_naive.cu)
 add_executable(canny_opencv src/canny_opencv.cpp)
 
 # Link libraries for CUDA version
-target_link_libraries(canny_cuda 
+target_link_libraries(canny_cuda_naive 
     ${OpenCV_LIBS} 
     cudart 
     nppc 
@@ -60,7 +60,7 @@ target_link_libraries(canny_cuda
 target_link_libraries(canny_opencv ${OpenCV_LIBS})
 
 # Include directories
-target_include_directories(canny_cuda PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_include_directories(canny_cuda_naive PRIVATE ${OpenCV_INCLUDE_DIRS})
 target_include_directories(canny_opencv PRIVATE ${OpenCV_INCLUDE_DIRS})
 
 # Set output directories
@@ -70,8 +70,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Add custom targets for running the programs
 add_custom_target(run_cuda
-    COMMAND canny_cuda
-    DEPENDS canny_cuda
+    COMMAND canny_cuda_naive
+    DEPENDS canny_cuda_naive
     WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 )
 

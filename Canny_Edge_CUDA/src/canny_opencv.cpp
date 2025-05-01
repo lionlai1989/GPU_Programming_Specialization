@@ -34,27 +34,19 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Processing video: " << width << "x" << height << " @ " << fps << " fps" << std::endl;
+    std::cout << "Processing video: " << width << "x" << height << " @ " << fps << " fps" << " with " << total_frames
+              << " frames" << std::endl;
+
+    auto t1 = std::chrono::high_resolution_clock::now();
 
     // Process each frame
     cv::Mat frame;
-    int frame_count = 0;
-    auto t1 = std::chrono::high_resolution_clock::now();
+    cv::Mat gray(height, width, CV_8UC1);
+    cv::Mat edge_map(height, width, CV_8UC1);
     while (cap.read(frame)) {
-        // Convert to grayscale first
-        cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-
-        // Apply Canny edge detection
-        cv::Mat processed_frame;
-        cv::Canny(gray, processed_frame, 100, 200);
-
-        writer.write(processed_frame);
-
-        // frame_count++;
-        // if (frame_count % 10 == 0) {
-        //     std::cout << "Processed frame " << frame_count << " of " << total_frames << std::endl;
-        // }
+        cv::Canny(gray, edge_map, 100, 200);
+        writer.write(edge_map);
     }
 
     auto t2 = std::chrono::high_resolution_clock::now();
