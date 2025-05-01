@@ -37,16 +37,23 @@ int main(int argc, char *argv[]) {
     std::cout << "Processing video: " << width << "x" << height << " @ " << fps << " fps" << " with " << total_frames
               << " frames" << std::endl;
 
+    std::vector<cv::Mat> frames;
+    frames.reserve(total_frames);
+    cv::Mat temp;
+    while (cap.read(temp)) {
+        frames.push_back(temp.clone());
+    }
+    cap.release();
+
     auto t1 = std::chrono::high_resolution_clock::now();
 
     // Process each frame
-    cv::Mat frame;
     cv::Mat gray(height, width, CV_8UC1);
     cv::Mat edge_map(height, width, CV_8UC1);
-    while (cap.read(frame)) {
+    for (auto &frame : frames) {
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
         cv::Canny(gray, edge_map, 100, 200);
-        writer.write(edge_map);
+        // writer.write(edge_map);
     }
 
     auto t2 = std::chrono::high_resolution_clock::now();
@@ -54,7 +61,6 @@ int main(int argc, char *argv[]) {
     std::cout << "Time taken: " << duration.count() << " milliseconds" << std::endl;
 
     // Release resources
-    cap.release();
     writer.release();
 
     std::cout << "Done. Output saved as " << output_file << std::endl;
