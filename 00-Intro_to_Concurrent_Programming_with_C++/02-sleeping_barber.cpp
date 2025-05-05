@@ -9,166 +9,161 @@
 #include <thread>
 #include <vector>
 
-constexpr int CUSTOMERS_SEATS = 10; // Number of seats in BarberShop
-constexpr int BARBERS = 3;          // Number of Barbers working
+static int rand_int(int lo, int hi) {
+    thread_local std::mt19937 gen{std::random_device{}()};
+    std::uniform_int_distribution<> dist(lo, hi);
+    return dist(gen);
+}
 
-std::condition_variable barber_cv;
-std::atomic<bool> SHOP_OPEN{true};
-
-template <typename T> class BlockingQueue {
-  private:
-    const int capacity;
-    std::queue<T> q;
-    std::mutex mtx;
-    std::condition_variable cv_not_full, cv_not_empty;
-    std::condition_variable cv_empty;
-
-  public:
-    BlockingQueue(int cap) : capacity(cap) {}
-
-    // Enqueue value, blocking if queue is full
-    void enqueue(T value) {
-        std::unique_lock<std::mutex> lock(mtx);
-        cv_not_full.wait(lock, [&]() { return q.size() < capacity; });
-        q.push(value);
-        cv_not_empty.notify_one();
-    }
-
-    // Dequeue value, blocking if queue is empty
-    T dequeue() {
-        std::unique_lock<std::mutex> lock(mtx);
-        cv_not_empty.wait(lock, [&]() { return !q.empty(); });
-        T value = q.front();
-        q.pop();
-        cv_not_full.notify_one();
-        if (q.empty()) {
-            cv_empty.notify_one();
-        }
-        return value;
-    }
-
-    void wait_until_empty() {
-        std::unique_lock<std::mutex> lock(mtx);
-        cv_empty.wait(lock, [&]() { return q.empty(); });
-    }
-
-    bool empty() {
-        std::lock_guard<std::mutex> lock(mtx);
-        return q.empty();
-    }
-    bool full() {
-        std::lock_guard<std::mutex> lock(mtx);
-        return q.size() == capacity;
-    }
-};
+// Forward declaration
+class BarberShop;
 
 class Customer {
   public:
-    std::string name;
-    int haircut_time;
+    Customer(int id, BarberShop &shop);
+    void operator()(); // thread entry
 
-    Customer(std::string name, int haircut_time) : name(name), haircut_time(haircut_time) {}
+    int get_id() const { return id; }
 
-    void trim() {
-        std::cout << name << " haircut started." << std::endl;
-
-        std::this_thread::sleep_for(std::chrono::seconds(static_cast<int>(haircut_time)));
-
-        std::cout << name << " haircut finished. Took " << haircut_time << " seconds" << std::endl;
-    }
+  private:
+    int id;
+    BarberShop &shop;
 };
 
 class Barber {
-  private:
-    BlockingQueue<Customer> &bq;
-    int id;
-    bool is_sleeping;
-
   public:
-    Barber(BlockingQueue<Customer> &bq, int id) : bq(bq), id(id), is_sleeping(true) {}
+    Barber(int id, BarberShop &shop);
+    void operator()(); // thread entry
 
-    void run() {
-        while (SHOP_OPEN) {
-            Customer c = bq.dequeue();
-        }
-    }
+  private:
+    int id;
+    BarberShop &shop;
 };
 
-void wait() {
-    // Wait for 5 to 10 seconds.
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(5, 10);
-    std::this_thread::sleep_for(std::chrono::seconds(static_cast<int>(dis(gen))));
-}
+class BarberShop {
+  public:
+    BarberShop(int num_chairs) : num_chairs_(num_chairs), shop_open_(true), waiting_count_(0) {}
 
-std::string random_name() {
-    static constexpr char CHARACTERS[] = "abcdefghijklmnopqrstuvwxyz";
-    static constexpr std::size_t CHAR_COUNT = sizeof(CHARACTERS) - 1;
-
-    // Seed with a real random value, if available
-    static thread_local std::random_device rd;
-    static thread_local std::mt19937 engine(rd());
-    std::uniform_int_distribution<std::size_t> dist(0, CHAR_COUNT - 1);
-
-    std::string result;
-    result.reserve(5);
-    for (std::size_t i = 0; i < 5; ++i) {
-        result += CHARACTERS[dist(engine)];
+    // Called by Customer threads
+    bool enter_shop(int customer_id) {
+        std::unique_lock<std::mutex> lock(mtx_);
+        if (waiting_count_ >= num_chairs_) {
+            // No free chair
+            return false;
+        }
+        // Sit in waiting room
+        waiting_.push(customer_id);
+        ++waiting_count_;
+        cv_barber_.notify_one(); // wake a barber
+        cv_customer_.wait(lock, [&] {
+            // wait until barber signals it's this customer's turn
+            return serving_id_ == customer_id;
+        });
+        return true;
     }
-    return result;
+
+    // Called by Barber threads
+    bool next_customer(int &out_customer_id) {
+        std::unique_lock<std::mutex> lock(mtx_);
+        cv_barber_.wait(lock, [&] { return !waiting_.empty() || !shop_open_.load(); });
+        if (!shop_open_.load() && waiting_.empty())
+            return false; // no more work, time to go home
+
+        out_customer_id = waiting_.front();
+        waiting_.pop();
+        --waiting_count_;
+        serving_id_ = out_customer_id;
+        cv_customer_.notify_one(); // tell that customer to proceed
+        return true;
+    }
+
+    void close_shop() {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            shop_open_ = false;
+        }
+        cv_barber_.notify_all();
+    }
+
+  private:
+    friend class Customer;
+    friend class Barber;
+
+    const int num_chairs_;
+    std::atomic<bool> shop_open_;
+    std::mutex mtx_;
+    std::condition_variable cv_barber_;
+    std::condition_variable cv_customer_;
+
+    std::queue<int> waiting_;
+    int waiting_count_;
+    int serving_id_; // ID of customer currently in chair
+};
+
+// Customer Implementation
+Customer::Customer(int id, BarberShop &shop) : id(id), shop(shop) {}
+
+void Customer::operator()() {
+    // simulate random arrival delay
+    std::this_thread::sleep_for(std::chrono::milliseconds(rand_int(200, 800)));
+
+    if (!shop.enter_shop(id)) {
+        std::cout << "Customer " << id << " leaves (no free chairs).\n";
+        return;
+    }
+
+    // Now being served
+    int haircut_ms = rand_int(500, 2000);
+    std::cout << "Customer " << id << " is getting a haircut (" << haircut_ms << "ms).\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(haircut_ms));
+    std::cout << "Customer " << id << " done.\n";
 }
 
-int random_seconds() {
-    // Returns a random integer in [10, 30]
-    static constexpr int MIN = 10;
-    static constexpr int MAX = 30;
+// Barber Implementation
+Barber::Barber(int id, BarberShop &shop) : id(id), shop(shop) {}
 
-    static thread_local std::random_device rd;
-    static thread_local std::mt19937 engine(rd());
-    std::uniform_int_distribution<int> dist(MIN, MAX);
-    return dist(engine);
+void Barber::operator()() {
+    while (true) {
+        int cust_id;
+        if (!shop.next_customer(cust_id)) {
+            // shop closed and no customers
+            break;
+        }
+        std::cout << "[Barber " << id << "] starts haircut for Customer " << cust_id
+                  << ". Waiting remain: " << (shop.waiting_count_) << "\n";
+        // actual haircut simulated in Customer thread
+    }
+    std::cout << "[Barber " << id << "] is going home.\n";
 }
 
 // g++ 02-sleeping_barber.cpp -std=c++17 -pthread -Wall -Wextra && ./a.out
 int main() {
-    BlockingQueue<Customer> customer_queue(CUSTOMERS_SEATS);
+    constexpr int NUM_BARBERS = 3;
+    constexpr int NUM_CHAIRS = 5;
+    constexpr int NUM_CUSTOMERS = 20;
+
+    BarberShop shop(NUM_CHAIRS);
+
+    // Start barber threads
     std::vector<std::thread> barber_threads;
+    for (int i = 1; i <= NUM_BARBERS; ++i)
+        barber_threads.emplace_back(Barber(i, shop));
+
+    // Start customer threads
     std::vector<std::thread> customer_threads;
+    for (int i = 1; i <= NUM_CUSTOMERS; ++i)
+        customer_threads.emplace_back(Customer(i, shop));
 
-    // Create barbers
-    for (int i = 0; i < BARBERS; ++i) {
-        barber_threads.emplace_back([&customer_queue, i]() {
-            Barber barber(customer_queue, i);
-            barber.run();
-        });
-    }
+    // Wait for all customers to finish (either served or left)
+    for (auto &t : customer_threads)
+        t.join();
 
-    // Create customers. There are only 10 seats for customers, but 20 customers
-    // will be spawned unpredictably.
-    for (int i = 0; i < 20; ++i) {
-        Customer c(random_name(), random_seconds());
+    // Close shop and wake barbers so they can exit
+    shop.close_shop();
 
-        // From every 5 to 10 seconds, there will be a customer entering.
-        wait();
+    for (auto &t : barber_threads)
+        t.join();
 
-        if (!customer_queue.full()) {
-            customer_queue.enqueue(std::move(c));
-        } else {
-            std::cout << "Queue full, customer " << c.name << "  has left." << std::endl;
-        }
-    }
-
-    // Wait for all customers to be served
-    customer_queue.wait_until_empty();
-
-    // Close the shop
-    SHOP_OPEN = false;
-    barber_cv.notify_all();
-
-    for (auto &thread : barber_threads) {
-        thread.join();
-    }
-
+    std::cout << "Shop is now closed.\n";
     return 0;
 }
