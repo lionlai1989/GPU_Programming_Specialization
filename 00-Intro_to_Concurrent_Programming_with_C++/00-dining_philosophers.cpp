@@ -107,6 +107,7 @@ class Philosopher {
  */
 std::atomic<bool> Philosopher::running{false};
 
+// g++ 00-dining_philosophers.cpp -std=c++17 -pthread -Wall -Wextra && ./a.out
 int main() {
     const int N = 5;
     std::vector<std::mutex> forks(N);

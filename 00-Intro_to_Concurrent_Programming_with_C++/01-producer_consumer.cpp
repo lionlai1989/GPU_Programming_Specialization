@@ -96,6 +96,7 @@ class Consumer {
     }
 };
 
+// g++ 01-producer_consumer.cpp -std=c++17 -pthread -Wall -Wextra && ./a.out
 int main() {
     // Initialize random number generation
     std::mt19937 random_gen{std::random_device{}()};
