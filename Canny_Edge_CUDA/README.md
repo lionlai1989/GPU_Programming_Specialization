@@ -1,6 +1,6 @@
 # Canny Edge CUDA
 
-![Video Comparison](combine.gif)
+![Video Comparison](combine_5s.gif)
 
 ## Source Files
 
@@ -98,8 +98,8 @@ You can concatenate the input and output videos horizontally for comparison usin
 # Horizontal stack: -filter_complex "[0:v][1:v]hstack=inputs=2[v]"
 # Vertical stack:   -filter_complex "[0:v][1:v]vstack=inputs=2[v]"
 ffmpeg \
-  -i data/me.mp4 \
-  -i output/canny_edge.mp4 \
+  -i canny_cuda_naive.mp4 \
+  -i data/1920x960_100sec_30fps.mp4 \
   -filter_complex "[0:v][1:v]vstack=inputs=2[v]" \
   -map "[v]" \
   -vsync 2 \
@@ -113,6 +113,8 @@ ffmpeg \
 The comparison is shown as a gif below:
 
 ```bash
-# First, create a GIF
-ffmpeg -i combine.mp4 -vf "fps=15,scale=640:-1:flags=lanczos" -loop 0 combine.gif
+# Get the first 5 seconds
+ffmpeg -i combine.mp4 -t 5 -c copy combine_5s.mp4
+# mp4 to gif
+ffmpeg -i combine_5s.mp4 -vf "fps=10,scale=640:-1:flags=lanczos" -loop 0 combine_5s.gif
 ```
