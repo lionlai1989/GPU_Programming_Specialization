@@ -16,7 +16,7 @@ class BlockingQueue {
     std::condition_variable cv_not_empty;
     std::condition_variable cv_not_full;
     bool is_done = false;
-    const size_t max_size = 1500; // Maximum number of frames to buffer
+    const size_t max_size = 300; // Maximum number of frames to buffer
 
   public:
     void enqueue(cv::Mat &&frame) { // Use move semantics
@@ -63,9 +63,8 @@ void writer_thread(BlockingQueue &queue, cv::VideoWriter &writer) {
     }
 }
 
-// ./build/canny_opencv
 int main(int argc, char *argv[]) {
-    std::string input_file{"data/output.mp4"};
+    std::string input_file{"data/1920x960_100sec_30fps.mp4"}; // 3840x1920_100sec_30fps
     std::string output_file{"canny_opencv.mp4"};
 
     if (input_file.empty() || output_file.empty()) {
@@ -126,7 +125,8 @@ int main(int argc, char *argv[]) {
     assert(frame_count == total_frames);
 
     std::cout << "Total time of all frame: " << accum_time
-              << " us. Each frame average time: " << accum_time / total_frames << " us." << std::endl;
+              << " microseconds. Each frame average time: " << accum_time / total_frames << " microseconds."
+              << std::endl;
 
     reader_queue.set_done();
     writer_queue.set_done();
@@ -138,7 +138,7 @@ int main(int argc, char *argv[]) {
 
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-    std::cout << "Time taken: " << duration.count() << " milliseconds" << std::endl;
+    std::cout << "End-to-end runtime: " << duration.count() << " milliseconds" << std::endl;
 
     std::cout << "Done. Output saved as " << output_file << std::endl;
     return 0;
