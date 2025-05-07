@@ -1,4 +1,4 @@
-# Canny Edge CUDA
+# Canny Edge Detector with CUDA from scratch
 
 ![Video Comparison](combine_5s.gif)
 
@@ -27,20 +27,24 @@ The fundamental framework of all source files do the following three things:
 ## Performance Evaluation
 
 Performance tests are conducted using two 360° video samples:
-- High-resolution: 3840×1920 pixels, 30 FPS, 100 seconds duration
-- Low-resolution: 1920×960 pixels, 30 FPS, 100 seconds duration
+- High-resolution: 3840x1920 pixels, 30 FPS, 100 seconds duration
+- Low-resolution: 1920x960 pixels, 30 FPS, 100 seconds duration
 
 Performance metrics were measured for each implementation:
 
-| Implementation | High Resolution<br>(3840×1920) |  | Low Resolution<br>(1920×960) |  |
+| Implementation | High Resolution<br>(3840x1920) |  | Low Resolution<br>(1920x960) |  |
 | -------------- | :-----------------------------: | :-: | :--------------------------: | :-: |
 |                | Per-Frame (μs)                 | Total (ms) | Per-Frame (μs)             | Total (ms) |
-| **OpenCV**     | –                              | –     | –                          | –     |
-| **Naive**      | –                              | –     | –                          | –     |
-| **Encapsulate**| –                              | –     | –                          | –     |
-| **Pinned**     | –                              | –     | –                          | –     |
+| **OpenCV**     | **22112**                              | 225260     | **6531**                          | 65753     |
+| **Naive**      | 17312                              | 219880     | 5585                          | 55696     |
+| **Encapsulate**| 11166                              | 219558     | 2496                          | 56908     |
+| **Pinned**     | **7823**                               | 210241     | **2086**                          | 53128     |
 
 *All values were measured over 10 runs, and the average of the best three results is reported.*
+
+The results show the pinned-memory CUDA kernel delivers approximately a **2.8×** (22112/7823) speedup over OpenCV on 3840×1920 input and about a **3.1×** (6531/2086) speedup on 1920×960 input.
+
+End-to-end runtimes remain similar, as video I/O, particularly writing frames to disk, is the primary bottleneck.
 
 ## Environment Setup
 
