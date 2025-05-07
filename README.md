@@ -12,6 +12,8 @@ This repository holds my study notes and hands-on projects for CUDA-based GPU pr
 
 ## [KLT Tracker with CUDA from scratch](https://github.com/lionlai1989/GPU_Programming_Specialization/tree/master/KLT_Tracker_CUDA)
 
+![KLT Tracker naive](./KLT_Tracker_CUDA/tracker_cuda_naive.gif)
+
 ## Prerequisites
 
 All code is tested on **Ubuntu 22.04**, using **CUDA 11.8** and **OpenCV 4.7.0**.
