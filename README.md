@@ -8,6 +8,8 @@ This repository holds my study notes and hands-on projects for CUDA-based GPU pr
 
 ## [Canny Edge Detector with CUDA from scratch](https://github.com/lionlai1989/GPU_Programming_Specialization/tree/master/Canny_Edge_CUDA)
 
+My CUDA implementation is **3× faster** than OpenCV, even with OpenCV already using 16 threads and SIMD.
+
 ![Video Comparison](./Canny_Edge_CUDA/combine_5s.gif)
 
 ## [KLT Tracker with CUDA from scratch](https://github.com/lionlai1989/GPU_Programming_Specialization/tree/master/KLT_Tracker_CUDA)
