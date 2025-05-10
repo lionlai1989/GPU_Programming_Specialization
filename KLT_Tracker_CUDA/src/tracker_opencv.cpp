@@ -26,7 +26,7 @@ void plot_trajectory(cv::Mat &display, const std::vector<std::vector<cv::Point2f
 
 int main(int argc, char **argv) {
     std::string input_mp4 = "1920_1080_30fps.mp4";
-    std::string output_mp4 = "opencv.mp4";
+    std::string output_mp4 = "tracker_opencv.mp4";
 
     std::vector<cv::Point2f> prev_pts;
     prev_pts.push_back(cv::Point2f(1676, 654));
