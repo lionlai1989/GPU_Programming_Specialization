@@ -20,6 +20,15 @@ My CUDA implementation is **3× faster** than OpenCV, even with OpenCV already u
 
 All code is tested on **Ubuntu 22.04**, using **CUDA 11.8** and **OpenCV 4.7.0**.
 
+My laptop has one GPU "NVIDIA RTX A3000" and one Intel CPU with 16 CPUs and 32 GB RAM.
+```
+CPU(s):                   16
+  On-line CPU(s) list:    0-15
+    Thread(s) per core:   2
+    Core(s) per socket:   8
+    Socket(s):            1
+```
+
 ### CUDA Toolkit 11.8
 
 Make sure CUDA is installed and environment variables are set:
