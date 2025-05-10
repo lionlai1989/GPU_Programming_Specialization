@@ -44,3 +44,10 @@ rm -rf build/ && cmake -S . -B build/ && cmake --build build/ -j 8
 ## Profiling CUDA
 
 Use NVIDIA Nsight Systems to identify kernel and transfer bottlenecks:
+
+
+## Reference:
+
+- [OpenCV's `cv::Mat`](https://docs.opencv.org/4.x/d3/d63/classcv_1_1Mat.html)
+
+- [Mat - The Basic Image Container](https://docs.opencv.org/4.x/d6/d6d/tutorial_mat_the_basic_image_container.html)
