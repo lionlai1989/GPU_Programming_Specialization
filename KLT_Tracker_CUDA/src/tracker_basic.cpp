@@ -178,22 +178,23 @@ class SparseOpticalFlow {
     float min_eig;
 
   public:
-    SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &init_frame, int levels = 3, int win_size = 31,
+    SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &init_gray, int levels = 3, int win_size = 31,
                       int max_iter = 30, float eps = 0.01, float min_eig = 1e-4);
+    ~SparseOpticalFlow();
 
-    std::vector<cv::Point2f> track(cv::Mat &next_frame);
+    std::vector<cv::Point2f> track(cv::Mat &next_bgr);
 };
 
-SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &init_frame, int levels, int win_size,
+SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &init_gray, int levels, int win_size,
                                      int max_iter, float eps, float min_eig)
     : levels(levels), win_size(win_size), max_iter(max_iter), eps(eps), min_eig(min_eig) {
     // Get frame dimensions
-    height = init_frame.rows;
-    width = init_frame.cols;
+    height = init_gray.rows;
+    width = init_gray.cols;
 
     // Pre-allocate pyramid memory
     pyr1.reserve(levels + 1);
-    pyr1.push_back(init_frame);         // 0
+    pyr1.push_back(init_gray);          // 0
     for (int i = 1; i <= levels; i++) { // 1, 2, 3
         pyr1.push_back(cv::Mat());      // Initialize as empty
     }
@@ -216,9 +217,12 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
     patch_grad_y = cv::Mat(win_size, win_size, CV_32F);
 }
 
-std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_frame) {
+std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
+    cv::Mat next_gray;
+    cv::cvtColor(next_bgr, next_gray, cv::COLOR_BGR2GRAY);
+
     // Copy next frame to first level of pyramid
-    next_frame.copyTo(pyr2[0]);
+    next_gray.copyTo(pyr2[0]);
     build_pyramid(pyr2, this->levels);
 
     // Pre-compute gradients for all pyramid levels
@@ -252,9 +256,10 @@ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_frame) {
      * OpenCV's cv::Mat is a reference-counted container. Its assignment operator makes the new Mat share the same pixel
      * data with the source, merely bumping an internal reference count, rather than allocating fresh storage.
      */
-    for (int i = 0; i <= levels; i++) {
-        pyr2[i].copyTo(pyr1[i]);
-    }
+    // for (int i = 0; i <= levels; i++) {
+    //     pyr2[i].copyTo(pyr1[i]);
+    // }
+    std::swap(pyr1, pyr2);
 
     /**
      * Why is it OK to do this?
@@ -263,6 +268,18 @@ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_frame) {
     prev_pts = next_pts;
 
     return next_pts;
+}
+
+SparseOpticalFlow::~SparseOpticalFlow() {
+    pyr1.clear();
+    pyr2.clear();
+    pyr2_grad_x.clear();
+    pyr2_grad_y.clear();
+
+    template_patch.release();
+    patch.release();
+    patch_grad_x.release();
+    patch_grad_y.release();
 }
 
 void plot_trajectory(cv::Mat &display, const std::vector<std::vector<cv::Point2f>> &trajectory) {
@@ -318,20 +335,18 @@ int main(int argc, char **argv) {
     // Init SparseOpticalFlow
     SparseOpticalFlow sof(prev_pts, prev_gray);
 
-    cv::Mat next_rgb;
+    cv::Mat next_bgr;
     while (true) {
-        if (!cap.read(next_rgb))
+        if (!cap.read(next_bgr))
             break;
-        cv::Mat next_gray;
-        cv::cvtColor(next_rgb, next_gray, cv::COLOR_BGR2GRAY);
 
-        std::vector<cv::Point2f> next_pts = sof.track(next_gray);
+        std::vector<cv::Point2f> next_pts = sof.track(next_bgr);
 
         for (size_t i = 0; i < prev_pts.size(); ++i) {
             trajectory[i].push_back(next_pts[i]);
         }
 
-        cv::Mat display = next_rgb.clone();
+        cv::Mat display = next_bgr.clone();
 
         plot_trajectory(display, trajectory);
         writer.write(display);

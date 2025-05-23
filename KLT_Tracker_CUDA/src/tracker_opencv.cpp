@@ -60,12 +60,12 @@ int main(int argc, char **argv) {
     cv::VideoWriter writer(output_mp4, cv::VideoWriter::fourcc('M', 'P', '4', 'V'), 30, cv::Size(width, height));
     cv::namedWindow("KLT Tracker", cv::WINDOW_AUTOSIZE);
 
-    cv::Mat next_rgb;
+    cv::Mat next_bgr;
     while (true) {
-        if (!cap.read(next_rgb))
+        if (!cap.read(next_bgr))
             break;
         cv::Mat next_gray;
-        cv::cvtColor(next_rgb, next_gray, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(next_bgr, next_gray, cv::COLOR_BGR2GRAY);
 
         cv::calcOpticalFlowPyrLK(prev_gray, next_gray, prev_pts, next_pts, status, err);
 
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
             trajectory[i].push_back(next_pts[i]);
         }
 
-        cv::Mat display = next_rgb.clone();
+        cv::Mat display = next_bgr.clone();
 
         plot_trajectory(display, trajectory);
         writer.write(display);
