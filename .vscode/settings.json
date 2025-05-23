@@ -110,7 +110,8 @@
         "stack": "cpp",
         "__nullptr": "cpp",
         "*.ipp": "cpp",
-        "__functional_base": "cpp"
+        "__functional_base": "cpp",
+        "filesystem": "cpp"
     },
     "cmake.sourceDirectory": "/home/lai/GPU_Programming_Specialization/KLT_Tracker_CUDA"
 }

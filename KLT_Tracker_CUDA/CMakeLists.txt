@@ -42,10 +42,10 @@ find_package(CUDA REQUIRED)
 # Add executables for both tracker implementations
 add_executable(tracker_basic src/tracker_basic.cpp)
 add_executable(tracker_opencv src/tracker_opencv.cpp)
+add_executable(tracker_cuda_naive src/tracker_cuda_naive.cu)
 
-# Common OpenCV configuration for both executables
+# For OpenCV version
 foreach(target tracker_basic tracker_opencv)
-    # Link OpenCV libraries using modern CMake practices
     target_link_libraries(${target} PRIVATE
         ${OpenCV_LIBS}
         opencv_core
@@ -57,6 +57,31 @@ foreach(target tracker_basic tracker_opencv)
     # Include OpenCV directories
     target_include_directories(${target} PRIVATE ${OpenCV_INCLUDE_DIRS})
 endforeach()
+
+# For CUDA version
+target_link_libraries(tracker_cuda_naive PRIVATE
+    ${OpenCV_LIBS}
+    opencv_core
+    opencv_highgui
+    opencv_imgproc
+    opencv_video
+    opencv_cudaimgproc
+    opencv_cudawarping
+    opencv_cudafilters
+    opencv_cudaarithm
+    cudart
+    nppc
+    nppial
+    nppisu
+    nppig
+    nppicc
+    nppif
+    nppidei
+    nppist
+)
+
+# Include OpenCV directories for CUDA version
+target_include_directories(tracker_cuda_naive PRIVATE ${OpenCV_INCLUDE_DIRS})
 
 # Enable testing
 enable_testing()
