@@ -1,18 +1,10 @@
 /**
  * The goal of this code is to implement the KLT tracker in C++ without using cv::calcOpticalFlowPyrLK.
- *
- * the current code can be compiled successfully and generate the correct result
- *
- * check the code to see if it can be improved.
- *
- * 1. minimize memory allocation/deallocation
- * 2. minimize memory copy
- * 3. i want the implementation to be as cuda-friendly as possible. by cuda-friendly, i mean that the code can be easily
- * converted/ported to cuda.
- *
+ * I tried to make the code as cuda-friendly as possible.
  */
 
 #include <cassert>
+#include <chrono>
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <sstream>
@@ -28,10 +20,12 @@ std::tuple<float, float, bool> lucas_kanade(const cv::Mat &img1, const cv::Mat &
                                             float y_l, float scaled_win_size, int origin_win_size, int max_iter,
                                             float eps, float min_eig) {
 
-    // Extract the template patch from I1 (no motion yet)
+    // Extract the template patch from img1
     cv::getRectSubPix(img1, cv::Size(origin_win_size, origin_win_size), {x_l, y_l}, template_patch);
     template_patch.convertTo(template_patch, CV_32F); // uint8 to float32
     assert(template_patch.type() == CV_32F);
+    // DEBUG: save template_patch to temp output
+    // cv::imwrite("tracker_basic_template_patch.png", template_patch);
 
     bool success = true;
 
@@ -42,17 +36,19 @@ std::tuple<float, float, bool> lucas_kanade(const cv::Mat &img1, const cv::Mat &
 
         // Check if the shifted patch is inside I2
         if (!in_bound(xc, yc, int(scaled_win_size / 2), img2.cols, img2.rows)) {
-            std::cout << "lucas_kanade Out of bound at iteration " << iter << std::endl;
+            // std::cout << "lucas_kanade Out of bound at iteration " << iter << std::endl;
             success = false;
             break;
         }
 
-        // Sample the patch in I2 and the gradients at (xc, yc)
+        // Sample the patch in img2 and the gradients at (xc, yc)
         cv::getRectSubPix(img2, cv::Size(origin_win_size, origin_win_size), {xc, yc}, patch);
         cv::getRectSubPix(grad_x, cv::Size(origin_win_size, origin_win_size), {xc, yc}, patch_grad_x);
         cv::getRectSubPix(grad_y, cv::Size(origin_win_size, origin_win_size), {xc, yc}, patch_grad_y);
         patch.convertTo(patch, CV_32F); // uint8 to float32
         assert(patch.type() == CV_32F);
+        // DEBUG: save patch to temp output
+        // cv::imwrite("tracker_basic_patch.png", patch);
 
         // Compute error image (template - patch)
         cv::Mat error = template_patch - patch;
@@ -70,7 +66,7 @@ std::tuple<float, float, bool> lucas_kanade(const cv::Mat &img1, const cv::Mat &
         // Check for degeneracy and compute minimum eigenvalue
         float det = Gxx * Gyy - Gxy * Gxy;
         if (det <= 0) {
-            std::cout << "lucas_kanade det <= 0 at iteration " << iter << std::endl;
+            // std::cout << "lucas_kanade det <= 0 at iteration " << iter << std::endl;
             success = false;
             break;
         }
@@ -78,12 +74,11 @@ std::tuple<float, float, bool> lucas_kanade(const cv::Mat &img1, const cv::Mat &
         float lambda_min = (trace - std::sqrt(trace * trace - 4 * det)) / 2.0;
         // Filter by minimum eigenvalue (normalized by patch size)
         if (lambda_min / (origin_win_size * origin_win_size) < min_eig) {
-            std::cout << "lucas_kanade lambda_min < min_eig at iteration " << iter << std::endl;
+            // std::cout << "lucas_kanade lambda_min < min_eig at iteration " << iter << std::endl;
             success = false;
             break;
         }
 
-        // Compute right-hand side vector
         float b1 = cv::sum(gx.mul(error))[0];
         float b2 = cv::sum(gy.mul(error))[0];
 
@@ -95,7 +90,6 @@ std::tuple<float, float, bool> lucas_kanade(const cv::Mat &img1, const cv::Mat &
         u += du;
         v += dv;
 
-        // Check convergence
         if (std::abs(du) < eps && std::abs(dv) < eps) {
             break;
         }
@@ -123,9 +117,9 @@ std::tuple<float, float, bool> pyramid_lucas_kanade(const std::vector<cv::Mat> &
         float u = u_prev * 2.0;
         float v = v_prev * 2.0;
 
-        // Check if the patch around (x_l, y_l) is inside I1
+        // Check if the patch around (x_l, y_l) is inside img1
         if (!in_bound(x_l, y_l, int(scale * win_size / 2), pyr1[lvl].cols, pyr1[lvl].rows)) {
-            std::cout << "Out of bound at level " << lvl << std::endl;
+            // std::cout << "Out of bound at level " << lvl << std::endl;
             success = false;
             break;
         }
@@ -135,7 +129,7 @@ std::tuple<float, float, bool> pyramid_lucas_kanade(const std::vector<cv::Mat> &
                          patch_grad_y, u, v, x_l, y_l, scale * win_size, win_size, max_iter, eps, min_eig);
 
         if (!success) {
-            std::cout << "Failed to converge at level " << lvl << std::endl;
+            // std::cout << "Failed to converge at level " << lvl << std::endl;
             break;
         }
 
@@ -166,7 +160,7 @@ class SparseOpticalFlow {
     std::vector<cv::Mat> pyr2_grad_x;
     std::vector<cv::Mat> pyr2_grad_y;
 
-    // Pre-allocate memory for template_patch, patch, patch_grad_x, patch_grad_y
+    // Pre-allocate memory for template_patch, patch, patch_grad_x, patch_grad_y. It only has header, no data.
     cv::Mat template_patch;
     cv::Mat patch;
     cv::Mat patch_grad_x;
@@ -230,6 +224,11 @@ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
         cv::Sobel(pyr2[lvl], pyr2_grad_x[lvl], CV_32F, 1, 0, 3);
         cv::Sobel(pyr2[lvl], pyr2_grad_y[lvl], CV_32F, 0, 1, 3);
     }
+    // DEBUG: save pyr2_grad_x and pyr2_grad_y to temp output
+    // cv::imwrite("tracker_basic_pyr2_grad_x0.png", pyr2_grad_x[0]);
+    // cv::imwrite("tracker_basic_pyr2_grad_y0.png", pyr2_grad_y[0]);
+    // cv::imwrite("tracker_basic_pyr2_grad_x3.png", pyr2_grad_x[3]);
+    // cv::imwrite("tracker_basic_pyr2_grad_y3.png", pyr2_grad_y[3]);
 
     // Track each point
     for (size_t i = 0; i < prev_pts.size(); i++) {
@@ -319,6 +318,8 @@ int main(int argc, char **argv) {
         std::cout << "Error: Could not open video file" << std::endl;
         return -1;
     }
+    int total_frames = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+
     cv::Mat prev_bgr, prev_gray;
     cap.read(prev_bgr);
     if (prev_bgr.empty()) {
@@ -330,36 +331,37 @@ int main(int argc, char **argv) {
     int width = prev_bgr.cols;
 
     cv::VideoWriter writer(output_mp4, cv::VideoWriter::fourcc('M', 'P', '4', 'V'), 30, cv::Size(width, height));
-    cv::namedWindow("KLT Tracker", cv::WINDOW_AUTOSIZE);
 
     // Init SparseOpticalFlow
     SparseOpticalFlow sof(prev_pts, prev_gray);
 
+    long long accum_time = 0;
     cv::Mat next_bgr;
     while (true) {
         if (!cap.read(next_bgr))
             break;
 
+        auto t1 = std::chrono::high_resolution_clock::now(); // start time
+
         std::vector<cv::Point2f> next_pts = sof.track(next_bgr);
+
+        auto t2 = std::chrono::high_resolution_clock::now(); // end time
+        accum_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 
         for (size_t i = 0; i < prev_pts.size(); ++i) {
             trajectory[i].push_back(next_pts[i]);
         }
 
-        cv::Mat display = next_bgr.clone();
-
-        plot_trajectory(display, trajectory);
-        writer.write(display);
-
-        // Show result
-        cv::imshow("KLT Tracker", display);
-        char key = cv::waitKey(30);
-        if (key == 27) // ESC key
-            break;
+        // Uncomment to visualize the result
+        // cv::Mat display = next_bgr.clone();
+        // plot_trajectory(display, trajectory);
+        // writer.write(display);
     }
+
+    std::cout << "Total time of all frames: " << accum_time << " microseconds. "
+              << "Each frame average time: " << accum_time / total_frames << " microseconds." << std::endl;
 
     cap.release();
     writer.release();
-    cv::destroyAllWindows();
     return 0;
 }

@@ -1,8 +1,9 @@
 /**
- * Use OpenCV's KLT tracker to track the points in the video.
+ * Use OpenCV's KLT tracker `calcOpticalFlowPyrLK` to track sparse points in videos.
  *
  */
 
+#include <chrono>
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <sstream>
@@ -47,6 +48,8 @@ int main(int argc, char **argv) {
         std::cout << "Error: Could not open video file" << std::endl;
         return -1;
     }
+    int total_frames = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+
     cv::Mat prev_bgr, prev_gray;
     cap.read(prev_bgr);
     if (prev_bgr.empty()) {
@@ -58,38 +61,39 @@ int main(int argc, char **argv) {
     int width = prev_bgr.cols;
 
     cv::VideoWriter writer(output_mp4, cv::VideoWriter::fourcc('M', 'P', '4', 'V'), 30, cv::Size(width, height));
-    cv::namedWindow("KLT Tracker", cv::WINDOW_AUTOSIZE);
 
+    long long accum_time = 0;
     cv::Mat next_bgr;
     while (true) {
         if (!cap.read(next_bgr))
             break;
+
+        auto t1 = std::chrono::high_resolution_clock::now(); // start time
+
         cv::Mat next_gray;
         cv::cvtColor(next_bgr, next_gray, cv::COLOR_BGR2GRAY);
-
         cv::calcOpticalFlowPyrLK(prev_gray, next_gray, prev_pts, next_pts, status, err);
+
+        auto t2 = std::chrono::high_resolution_clock::now(); // end time
+        accum_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 
         for (size_t i = 0; i < prev_pts.size(); ++i) {
             trajectory[i].push_back(next_pts[i]);
         }
 
-        cv::Mat display = next_bgr.clone();
-
-        plot_trajectory(display, trajectory);
-        writer.write(display);
-
-        // Show result
-        cv::imshow("KLT Tracker", display);
-        char key = cv::waitKey(30);
-        if (key == 27) // ESC key
-            break;
+        // Uncomment to visualize the result
+        // cv::Mat display = next_bgr.clone();
+        // plot_trajectory(display, trajectory);
+        // writer.write(display);
 
         prev_gray = next_gray;
         prev_pts = next_pts;
     }
 
+    std::cout << "Total time of all frames: " << accum_time << " microseconds. "
+              << "Each frame average time: " << accum_time / total_frames << " microseconds." << std::endl;
+
     cap.release();
     writer.release();
-    cv::destroyAllWindows();
     return 0;
 }
