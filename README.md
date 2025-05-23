@@ -78,3 +78,4 @@ rm -rf build/ install_opencv/ \
 ## Resources
 
 - GPU Programming Specialization offered by Johns Hopkins University
+- [An Even Easier Introduction to CUDA](https://developer.nvidia.com/blog/even-easier-introduction-cuda/)
