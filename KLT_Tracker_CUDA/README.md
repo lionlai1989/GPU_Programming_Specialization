@@ -26,6 +26,10 @@ Follow steps in the top-level [`README.md`](https://github.com/lionlai1989/GPU_P
 
 - Build:
 ```bash
+# Debug
+rm -rf build/ && cmake -S . -B build/ -DCMAKE_BUILD_TYPE=Debug && cmake --build build/ -j 8
+
+# Release
 rm -rf build/ && cmake -S . -B build/ && cmake --build build/ -j 8
 ```
 
@@ -38,6 +42,8 @@ rm -rf build/ && cmake -S . -B build/ && cmake --build build/ -j 8
 ./build/tracker_basic
 
 # CUDA variants
+./build/tracker_cuda_naive
+
 ```
 
 

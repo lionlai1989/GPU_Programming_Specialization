@@ -9,12 +9,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Set default build type if not specified
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
+    set(CMAKE_BUILD_TYPE Debug)
 endif()
 
 # Set compiler flags based on build type
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G -O0 -DDEBUG")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -DDEBUG")
+else()
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+endif()
 
 # Set CUDA architecture
 set(CMAKE_CUDA_ARCHITECTURES 86)  # Adjust this based on your target GPU
@@ -70,6 +75,7 @@ target_link_libraries(tracker_cuda_naive PRIVATE
     opencv_cudafilters
     opencv_cudaarithm
     cudart
+    cublas
     nppc
     nppial
     nppisu
