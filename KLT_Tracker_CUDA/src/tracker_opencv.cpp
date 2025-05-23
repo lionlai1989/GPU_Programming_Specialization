@@ -81,13 +81,13 @@ int main(int argc, char **argv) {
             trajectory[i].push_back(next_pts[i]);
         }
 
+        prev_gray = next_gray;
+        prev_pts = next_pts;
+
         // Uncomment to visualize the result
         // cv::Mat display = next_bgr.clone();
         // plot_trajectory(display, trajectory);
         // writer.write(display);
-
-        prev_gray = next_gray;
-        prev_pts = next_pts;
     }
 
     std::cout << "Total time of all frames: " << accum_time << " microseconds. "
