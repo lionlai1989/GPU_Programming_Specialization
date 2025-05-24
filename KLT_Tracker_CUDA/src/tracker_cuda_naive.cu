@@ -147,10 +147,6 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp32f *d_img1, const
                                                      float eps, float min_eig, int width, int height,
                                                      cudaStream_t stream, cublasHandle_t cublasH) {
 
-    NppStreamContext ctx;
-    NPP_CHECK(nppGetStreamContext(&ctx));
-    ctx.hStream = stream;
-
     cudaGetRectSubPix(d_img1, origin_win_size, x_l, y_l, d_template_patch, width, height, stream);
     // DEBUG
     // save_device_image<Npp32f, CV_32FC1>(d_template_patch, origin_win_size, origin_win_size, "template_patch.png");
