@@ -294,52 +294,62 @@ pyramid_lucas_kanade(std::vector<Npp8u *> &d_pyr1, std::vector<Npp8u *> &d_pyr2,
 
 __host__ void build_pyramid(std::vector<Npp8u *> &pyr, int levels, const int width, const int height,
                             cudaStream_t stream) {
-    // pyr is a vector of pointers pointing to the memory. Memory has been pre-allocated.
+
+    NppStreamContext ctx;
+    NPP_CHECK(nppGetStreamContext(&ctx));
+    ctx.hStream = stream;
+
     for (int i = 0; i < levels; i++) { // 0, 1, 2
         int src_w = width >> i;
         int src_h = height >> i;
         int dst_w = width >> (i + 1);
         int dst_h = height >> (i + 1);
+        int srcStep = src_w * sizeof(Npp8u);
+        int dstStep = dst_w * sizeof(Npp8u);
 
-        cv::cuda::GpuMat d_src(src_h, src_w, CV_8UC1, pyr[i]);
+        NppiSize srcSize = {src_w, src_h};
+        NppiRect srcROI = {0, 0, src_w, src_h};
+        NppiSize dstSize = {dst_w, dst_h};
+        NppiRect dstROI = {0, 0, dst_w, dst_h};
+        NPP_CHECK(nppiResize_8u_C1R_Ctx(
+            /* pSrc         */ pyr[i],
+            /* nSrcStep     */ srcStep,
+            /* oSrcSize     */ srcSize,
+            /* oSrcROI      */ srcROI,
+            /* pDst         */ pyr[i + 1],
+            /* nDstStep     */ dstStep,
+            /* oDstSize     */ dstSize,
+            /* oDstROI      */ dstROI,
+            /* eInterpolation */ NPPI_INTER_LINEAR,
+            /* nppStreamCtx */ ctx));
 
-        cv::cuda::GpuMat d_dst(dst_h, dst_w, CV_8UC1, pyr[i + 1]);
+        // OpenCV works. But I don't want to use it.
+        // cv::cuda::GpuMat d_src(src_h, src_w, CV_8UC1, pyr[i]);
+        // cv::cuda::GpuMat d_dst(dst_h, dst_w, CV_8UC1, pyr[i + 1]);
+        // cv::cuda::Stream cvStream = cv::cuda::StreamAccessor::wrapStream(stream);
+        // cv::cuda::pyrDown(d_src, d_dst, cvStream);
 
-        cv::cuda::Stream cvStream = cv::cuda::StreamAccessor::wrapStream(stream);
-
-        cv::cuda::pyrDown(d_src, d_dst, cvStream);
+        // NPP GaussPyramidLayerDown does not work. I don't know why.
+        // NppiSize srcSize = {src_w, src_h};
+        // NppiPoint srcOffset = {0, 0};
+        // NppiSize dstSize = {dst_w, dst_h};
+        // static const Npp32f gauss5f[5] = {1.0f / 16.0f, 4.0f / 16.0f, 6.0f / 16.0f, 4.0f / 16.0f, 1.0f / 16.0f};
+        // NPP_CHECK(nppiFilterGaussPyramidLayerDownBorder_8u_C1R_Ctx(
+        //     /* pSrc           */ pyr[i],
+        //     /* nSrcStep       */ srcStep,
+        //     /* oSrcSize       */ srcSize,
+        //     /* oSrcOffset     */ srcOffset,
+        //     /* pDst           */ pyr[i + 1],
+        //     /* nDstStep       */ dstStep,
+        //     /* oSizeROI       */ dstSize,
+        //     /* nRate          */ 2.0f,    // downsample rate (2.0 = keep every 2nd pixel)
+        //     /* nFilterTaps    */ 5,       // length of gauss5f[]
+        //     /* pKernel        */ gauss5f, // normalized float kernel
+        //     /* eBorderType    */ NPP_BORDER_REPLICATE,
+        //     /* nppStreamCtx   */ ctx));
     }
 
-    // TODO: use NPP to replace cv::cuda::pyrDown
-    // for (int i = 0; i < levels; i++) { // 0, 1, 2
-    //     int src_w = width >> i;
-    //     int src_h = height >> i;
-    //     int dst_w = width >> (i + 1);
-    //     int dst_h = height >> (i + 1);
-
-    //     int srcStep = src_w * sizeof(Npp8u);
-    //     int dstStep = dst_w * sizeof(Npp8u);
-
-    //     NppiSize srcSize = {src_w, src_h};
-    //     NppiPoint srcOffset = {0, 0};
-    //     NppiSize dstSize = {dst_w, dst_h};
-
-    //     // Gaussian blur + downsample with default 5-tap kernel
-    //     NPP_CHECK(nppiFilterGaussPyramidLayerDownBorder_8u_C1R_Ctx(
-    //         /* pSrc           */ pyr[i],
-    //         /* nSrcStep       */ srcStep,
-    //         /* oSrcSize       */ srcSize,
-    //         /* oSrcOffset     */ srcOffset,
-    //         /* pDst           */ pyr[i + 1],
-    //         /* nDstStep       */ dstStep,
-    //         /* oSizeROI       */ dstSize,
-    //         /* nRate          */ 0.5f, // downsample factor
-    //         /* nFilterTaps    */ 0,    // 0 = use internal default (5 taps)
-    //         /* pKernel        */ nullptr,
-    //         /* eBorderType    */ NPP_BORDER_REPLICATE,
-    //         /* nppStreamCtx   */ ctx));
-    // }
-    // cudaStreamSynchronize(stream);
+    CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
 __host__ void apply_sobel_filter(Npp8u *src, Npp32f *grad_x, Npp32f *grad_y, int width, int height,
@@ -482,7 +492,6 @@ __global__ void bgr_to_gray(const unsigned char *src, unsigned char *dst, size_t
     if (x >= width || y >= height)
         return;
 
-    // Row pointers using pitched memory
     const unsigned char *rowSrc = src + y * srcStep;
     unsigned char *rowDst = dst + y * dstStep;
 
