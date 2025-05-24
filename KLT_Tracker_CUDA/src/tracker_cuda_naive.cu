@@ -339,18 +339,11 @@ __host__ void apply_sobel_filter(Npp32f *src, Npp32f *grad_x, Npp32f *grad_y, in
     NPP_CHECK(nppGetStreamContext(&ctx));
     ctx.hStream = stream;
 
-    // Npp32f *d_temp = nullptr;
-    size_t elems = size_t(width) * size_t(height);
-    // CUDA_CHECK(cudaMalloc(&d_temp, elems * sizeof(Npp32f)));
-
     int srcStep = width * sizeof(Npp32f);
     int dstStep = width * sizeof(Npp32f);
     NppiSize imgSize = {width, height};
     NppiPoint imgOffset = {0, 0};
     NppiSize roiSize = {width, height};
-
-    // Convert uint8 to float32
-    // NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(src, srcStep, d_temp, dstStep, roiSize, ctx));
 
     // "Vert" finds vertical edges (gradient in x direction)
     NPP_CHECK(nppiFilterSobelVertBorder_32f_C1R_Ctx(src, dstStep, imgSize, imgOffset, grad_x, dstStep, roiSize,
@@ -359,8 +352,6 @@ __host__ void apply_sobel_filter(Npp32f *src, Npp32f *grad_x, Npp32f *grad_y, in
     // "Horiz" finds horizontal edges (gradient in y direction)
     NPP_CHECK(nppiFilterSobelHorizBorder_32f_C1R_Ctx(src, dstStep, imgSize, imgOffset, grad_y, dstStep, roiSize,
                                                      NPP_BORDER_REPLICATE, ctx));
-
-    // CUDA_CHECK(cudaFree(d_temp));
 }
 
 class SparseOpticalFlow {
@@ -382,6 +373,9 @@ class SparseOpticalFlow {
 
     // CUDA streams for parallel processing
     std::vector<cudaStream_t> streams;
+
+    // NPP context for the main stream
+    NppStreamContext main_npp_ctx;
 
     int win_size;
     int max_iter;
@@ -411,9 +405,10 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
     for (auto &stream : streams) {
         CUDA_CHECK(cudaStreamCreate(&stream));
     }
-    NppStreamContext ctx;
-    NPP_CHECK(nppGetStreamContext(&ctx));
-    ctx.hStream = streams[0];
+
+    // Initialize NPP context for the main stream
+    NPP_CHECK(nppGetStreamContext(&main_npp_ctx));
+    main_npp_ctx.hStream = streams[0];
 
     cublasCreate(&cublasH);
 
@@ -439,10 +434,10 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
         CUDA_CHECK(cudaMalloc((void **)&d_pyr2[i], pyr_size));
     }
     // Build initial pyramid d_pyr1
-    // Convert uint8 to float32. FIXME: Move host memory (init_gray) to device memory first.
+    // Convert uint8 to float32.
     CUDA_CHECK(cudaMemcpy(d_gray, init_gray.data, grayBytes, cudaMemcpyHostToDevice));
     NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_gray, width * sizeof(Npp8u), d_pyr1[0], width * sizeof(Npp32f),
-                                        {width, height}, ctx));
+                                        {width, height}, main_npp_ctx));
     build_pyramid(d_pyr1, levels, width, height, streams[0]);
     CUDA_CHECK(cudaStreamSynchronize(streams[0]));
     // DEBUG
@@ -500,10 +495,6 @@ __host__ void apply_bgr_to_gray(Npp8u *src, Npp8u *dst, size_t srcStep, size_t d
 }
 
 __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
-    NppStreamContext main_ctx;
-    NPP_CHECK(nppGetStreamContext(&main_ctx));
-    main_ctx.hStream = streams[0];
-
     int width = next_bgr.cols;
     int height = next_bgr.rows;
     size_t bgrStepBytes = next_bgr.step[0];
@@ -521,7 +512,7 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
 
     // Build pyramid pyr2
     NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_gray, width * sizeof(Npp8u), d_pyr2[0], width * sizeof(Npp32f),
-                                        {width, height}, main_ctx));
+                                        {width, height}, main_npp_ctx));
     build_pyramid(this->d_pyr2, levels, width, height, streams[0]);
     CUDA_CHECK(cudaStreamSynchronize(streams[0])); // sync main stream
     // DEBUG

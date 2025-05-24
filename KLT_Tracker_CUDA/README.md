@@ -49,6 +49,16 @@ rm -rf build/ && cmake -S . -B build/ && cmake --build build/ -j 8
 
 ## Profiling CUDA
 
+```
+nsys profile \
+--trace=cuda,nvtx,osrt \
+--trace-fork-before-exec=true \
+--output=tracker_cuda_naive \
+./build/tracker_cuda_naive
+
+nsys stats tracker_cuda_naive.nsys-rep
+```
+
 Use NVIDIA Nsight Systems to identify kernel and transfer bottlenecks:
 
 
