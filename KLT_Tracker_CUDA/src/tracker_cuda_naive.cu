@@ -138,7 +138,7 @@ __host__ void cudaComputeDot(const float *vec1, const float *vec2, float *result
     cublasSdot(cublasH, N, vec1, 1, vec2, 1, result);
 }
 
-__host__ std::tuple<float, float, bool> lucas_kanade(const Npp8u *d_img1, const Npp8u *d_img2, const Npp32f *d_grad_x,
+__host__ std::tuple<float, float, bool> lucas_kanade(const Npp32f *d_img1, const Npp32f *d_img2, const Npp32f *d_grad_x,
                                                      const Npp32f *d_grad_y, Npp32f *d_template_patch, Npp32f *d_patch,
                                                      Npp32f *d_patch_grad_x, Npp32f *d_patch_grad_y, float u, float v,
                                                      float x_l, float y_l, float scaled_win_size, int origin_win_size,
@@ -149,16 +149,7 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp8u *d_img1, const 
     NPP_CHECK(nppGetStreamContext(&ctx));
     ctx.hStream = stream;
 
-    // Convert Npp8u to Npp32f
-    Npp32f *d_img1_32f, *d_img2_32f;
-    CUDA_CHECK(cudaMalloc(&d_img1_32f, width * height * sizeof(Npp32f)));
-    CUDA_CHECK(cudaMalloc(&d_img2_32f, width * height * sizeof(Npp32f)));
-    NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_img1, width * sizeof(Npp8u), d_img1_32f, width * sizeof(Npp32f),
-                                        {width, height}, ctx));
-    NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_img2, width * sizeof(Npp8u), d_img2_32f, width * sizeof(Npp32f),
-                                        {width, height}, ctx));
-
-    cudaGetRectSubPix(d_img1_32f, origin_win_size, x_l, y_l, d_template_patch, width, height, stream);
+    cudaGetRectSubPix(d_img1, origin_win_size, x_l, y_l, d_template_patch, width, height, stream);
     CUDA_CHECK(cudaStreamSynchronize(stream));
     // DEBUG
     // save_device_image<Npp32f, CV_32FC1>(d_template_patch, origin_win_size, origin_win_size, "template_patch.png");
@@ -182,7 +173,7 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp8u *d_img1, const 
         }
 
         // Sample the patch in I2 and the gradients at (xc, yc)
-        cudaGetRectSubPix(d_img2_32f, origin_win_size, xc, yc, d_patch, width, height, stream);
+        cudaGetRectSubPix(d_img2, origin_win_size, xc, yc, d_patch, width, height, stream);
         // DEBUG
         // save_device_image<Npp32f, CV_32FC1>(d_patch, origin_win_size, origin_win_size, "patch.png");
 
@@ -236,15 +227,13 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp8u *d_img1, const 
         CUDA_CHECK(cudaStreamSynchronize(stream));
     }
 
-    CUDA_CHECK(cudaFree(d_img1_32f));
-    CUDA_CHECK(cudaFree(d_img2_32f));
     CUDA_CHECK(cudaFree(d_error));
 
     return std::make_tuple(u, v, success);
 }
 
 __host__ std::tuple<float, float, bool>
-pyramid_lucas_kanade(std::vector<Npp8u *> &d_pyr1, std::vector<Npp8u *> &d_pyr2, std::vector<Npp32f *> &d_grad_x,
+pyramid_lucas_kanade(std::vector<Npp32f *> &d_pyr1, std::vector<Npp32f *> &d_pyr2, std::vector<Npp32f *> &d_grad_x,
                      std::vector<Npp32f *> &d_grad_y, Npp32f *d_template_patch, Npp32f *d_patch, Npp32f *d_patch_grad_x,
                      Npp32f *d_patch_grad_y, const cv::Point2f &pt, int levels, int win_size, int max_iter, float eps,
                      float min_eig, int width, int height, cudaStream_t stream, cublasHandle_t cublasH) {
@@ -289,7 +278,7 @@ pyramid_lucas_kanade(std::vector<Npp8u *> &d_pyr1, std::vector<Npp8u *> &d_pyr2,
     return std::make_tuple(u_prev, v_prev, success);
 }
 
-__host__ void build_pyramid(std::vector<Npp8u *> &pyr, int levels, const int width, const int height,
+__host__ void build_pyramid(std::vector<Npp32f *> &pyr, int levels, const int width, const int height,
                             cudaStream_t stream) {
 
     NppStreamContext ctx;
@@ -301,14 +290,14 @@ __host__ void build_pyramid(std::vector<Npp8u *> &pyr, int levels, const int wid
         int src_h = height >> i;
         int dst_w = width >> (i + 1);
         int dst_h = height >> (i + 1);
-        int srcStep = src_w * sizeof(Npp8u);
-        int dstStep = dst_w * sizeof(Npp8u);
+        int srcStep = src_w * sizeof(Npp32f);
+        int dstStep = dst_w * sizeof(Npp32f);
 
         NppiSize srcSize = {src_w, src_h};
         NppiRect srcROI = {0, 0, src_w, src_h};
         NppiSize dstSize = {dst_w, dst_h};
         NppiRect dstROI = {0, 0, dst_w, dst_h};
-        NPP_CHECK(nppiResize_8u_C1R_Ctx(
+        NPP_CHECK(nppiResize_32f_C1R_Ctx(
             /* pSrc         */ pyr[i],
             /* nSrcStep     */ srcStep,
             /* oSrcSize     */ srcSize,
@@ -347,35 +336,35 @@ __host__ void build_pyramid(std::vector<Npp8u *> &pyr, int levels, const int wid
     }
 }
 
-__host__ void apply_sobel_filter(Npp8u *src, Npp32f *grad_x, Npp32f *grad_y, int width, int height,
+__host__ void apply_sobel_filter(Npp32f *src, Npp32f *grad_x, Npp32f *grad_y, int width, int height,
                                  cudaStream_t stream) {
 
     NppStreamContext ctx;
     NPP_CHECK(nppGetStreamContext(&ctx));
     ctx.hStream = stream;
 
-    Npp32f *d_temp = nullptr;
+    // Npp32f *d_temp = nullptr;
     size_t elems = size_t(width) * size_t(height);
-    CUDA_CHECK(cudaMalloc(&d_temp, elems * sizeof(Npp32f)));
+    // CUDA_CHECK(cudaMalloc(&d_temp, elems * sizeof(Npp32f)));
 
-    int srcStep = width * sizeof(Npp8u);
+    int srcStep = width * sizeof(Npp32f);
     int dstStep = width * sizeof(Npp32f);
     NppiSize imgSize = {width, height};
     NppiPoint imgOffset = {0, 0};
     NppiSize roiSize = {width, height};
 
     // Convert uint8 to float32
-    NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(src, srcStep, d_temp, dstStep, roiSize, ctx));
+    // NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(src, srcStep, d_temp, dstStep, roiSize, ctx));
 
     // "Vert" finds vertical edges (gradient in x direction)
-    NPP_CHECK(nppiFilterSobelVertBorder_32f_C1R_Ctx(d_temp, dstStep, imgSize, imgOffset, grad_x, dstStep, roiSize,
+    NPP_CHECK(nppiFilterSobelVertBorder_32f_C1R_Ctx(src, dstStep, imgSize, imgOffset, grad_x, dstStep, roiSize,
                                                     NPP_BORDER_REPLICATE, ctx));
 
     // "Horiz" finds horizontal edges (gradient in y direction)
-    NPP_CHECK(nppiFilterSobelHorizBorder_32f_C1R_Ctx(d_temp, dstStep, imgSize, imgOffset, grad_y, dstStep, roiSize,
+    NPP_CHECK(nppiFilterSobelHorizBorder_32f_C1R_Ctx(src, dstStep, imgSize, imgOffset, grad_y, dstStep, roiSize,
                                                      NPP_BORDER_REPLICATE, ctx));
 
-    CUDA_CHECK(cudaFree(d_temp));
+    // CUDA_CHECK(cudaFree(d_temp));
 }
 
 class SparseOpticalFlow {
@@ -388,7 +377,7 @@ class SparseOpticalFlow {
     // GPU memory
     Npp8u *d_bgr, *d_gray;
 
-    std::vector<Npp8u *> d_pyr1, d_pyr2;
+    std::vector<Npp32f *> d_pyr1, d_pyr2;
     std::vector<Npp32f *> d_grad_x, d_grad_y;
 
     Npp32f *d_template_patch, *d_patch;
@@ -425,6 +414,9 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
     for (auto &stream : streams) {
         CUDA_CHECK(cudaStreamCreate(&stream));
     }
+    NppStreamContext ctx;
+    NPP_CHECK(nppGetStreamContext(&ctx));
+    ctx.hStream = streams[0];
 
     cublasCreate(&cublasH);
 
@@ -445,19 +437,22 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
         const int pyr_width = width >> i;
         const int pyr_height = height >> i;
 
-        size_t pyr_size = pyr_width * pyr_height * sizeof(Npp8u);
+        size_t pyr_size = pyr_width * pyr_height * sizeof(Npp32f);
         CUDA_CHECK(cudaMalloc((void **)&d_pyr1[i], pyr_size));
         CUDA_CHECK(cudaMalloc((void **)&d_pyr2[i], pyr_size));
     }
     // Build initial pyramid d_pyr1
-    CUDA_CHECK(cudaMemcpy(d_pyr1[0], init_gray.data, grayBytes, cudaMemcpyHostToDevice));
+    // Convert uint8 to float32. FIXME: Move host memory (init_gray) to device memory first.
+    CUDA_CHECK(cudaMemcpy(d_gray, init_gray.data, grayBytes, cudaMemcpyHostToDevice));
+    NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_gray, width * sizeof(Npp8u), d_pyr1[0], width * sizeof(Npp32f),
+                                        {width, height}, ctx));
     build_pyramid(d_pyr1, levels, width, height, streams[0]);
     CUDA_CHECK(cudaStreamSynchronize(streams[0]));
     // DEBUG
     // for (int i = 0; i <= levels; i++) {
     //     const int pyr_width = width >> i;
     //     const int pyr_height = height >> i;
-    //     save_device_image<Npp8u, CV_8UC1>(d_pyr1[i], pyr_width, pyr_height, "pyr1_" + std::to_string(i) + ".png");
+    //     save_device_image<Npp32f, CV_32FC1>(d_pyr1[i], pyr_width, pyr_height, "pyr1_" + std::to_string(i) + ".png");
     // }
 
     // Allocate GPU memory for d_grad_x and d_grad_y
@@ -507,6 +502,10 @@ __host__ void apply_bgr_to_gray(Npp8u *src, Npp8u *dst, size_t srcStep, size_t d
 }
 
 __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
+    NppStreamContext main_ctx;
+    NPP_CHECK(nppGetStreamContext(&main_ctx));
+    main_ctx.hStream = streams[0];
+
     int width = next_bgr.cols;
     int height = next_bgr.rows;
     size_t bgrStepBytes = next_bgr.step[0];
@@ -523,14 +522,15 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
     // save_device_image<Npp8u, CV_8UC1>(d_gray, width, height, "d_gray.png");
 
     // Build pyramid pyr2
-    CUDA_CHECK(cudaMemcpy(d_pyr2[0], d_gray, grayStepBytes * height, cudaMemcpyDeviceToDevice));
+    NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_gray, width * sizeof(Npp8u), d_pyr2[0], width * sizeof(Npp32f),
+                                        {width, height}, main_ctx));
     build_pyramid(this->d_pyr2, levels, width, height, streams[0]);
     CUDA_CHECK(cudaStreamSynchronize(streams[0])); // sync main stream
     // DEBUG
     // for (int i = 0; i <= levels; i++) {
     //     const int pyr_width = width >> i;
     //     const int pyr_height = height >> i;
-    //     save_device_image<Npp8u, CV_8UC1>(d_pyr2[i], pyr_width, pyr_height, "pyr2_" + std::to_string(i) + ".png");
+    //     save_device_image<Npp32f, CV_32FC1>(d_pyr2[i], pyr_width, pyr_height, "pyr2_" + std::to_string(i) + ".png");
     // }
 
     // Pre-compute gradients for all pyramid levels
