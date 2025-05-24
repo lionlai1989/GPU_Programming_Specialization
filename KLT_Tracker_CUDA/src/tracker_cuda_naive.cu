@@ -7,6 +7,8 @@
  * 2. Pre-allocate the required memory in the constructor.
  * 3. For each point, use one cuda stream to track
  * 4. Use cuda library to replace cv.
+ * 5. Use pinned host memory for cv::Mat so that cuda async version of cuda library can be used.
+ * 6. Use async version of cuda functions such that everything can be run asynchronously.
  *
  */
 
@@ -410,8 +412,8 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
 
     size_t bgrBytes = size_t(height) * width * 3u; // 3 channels
     size_t grayBytes = size_t(height) * width;
-    CUDA_CHECK(cudaMalloc(&d_bgr, bgrBytes));
-    CUDA_CHECK(cudaMalloc(&d_gray, grayBytes));
+    CUDA_CHECK(cudaMallocAsync(&d_bgr, bgrBytes, streams[0]));
+    CUDA_CHECK(cudaMallocAsync(&d_gray, grayBytes, streams[0]));
 
     // Initialize pyramid vectors
     d_pyr1.resize(levels + 1);
@@ -426,12 +428,12 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
         const int pyr_height = height >> i;
 
         size_t pyr_size = pyr_width * pyr_height * sizeof(Npp32f);
-        CUDA_CHECK(cudaMalloc((void **)&d_pyr1[i], pyr_size));
-        CUDA_CHECK(cudaMalloc((void **)&d_pyr2[i], pyr_size));
+        CUDA_CHECK(cudaMallocAsync(&d_pyr1[i], pyr_size, streams[0]));
+        CUDA_CHECK(cudaMallocAsync(&d_pyr2[i], pyr_size, streams[0]));
     }
     // Build initial pyramid d_pyr1
     // Convert uint8 to float32.
-    CUDA_CHECK(cudaMemcpy(d_gray, init_gray.data, grayBytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpyAsync(d_gray, init_gray.data, grayBytes, cudaMemcpyHostToDevice, streams[0]));
     NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_gray, width * sizeof(Npp8u), d_pyr1[0], width * sizeof(Npp32f),
                                         {width, height}, main_npp_ctx));
     build_pyramid(d_pyr1, levels, width, height, streams[0]);
@@ -448,16 +450,16 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
         const int pyr_height = height >> i;
 
         size_t grad_size = pyr_width * pyr_height * sizeof(Npp32f);
-        CUDA_CHECK(cudaMalloc(&d_grad_x[i], grad_size));
-        CUDA_CHECK(cudaMalloc(&d_grad_y[i], grad_size));
+        CUDA_CHECK(cudaMallocAsync(&d_grad_x[i], grad_size, streams[0]));
+        CUDA_CHECK(cudaMallocAsync(&d_grad_y[i], grad_size, streams[0]));
     }
 
     size_t patch_size = win_size * win_size * sizeof(Npp32f);
-    CUDA_CHECK(cudaMalloc(&d_template_patch, patch_size));
-    CUDA_CHECK(cudaMalloc(&d_patch, patch_size));
-    CUDA_CHECK(cudaMalloc(&d_patch_grad_x, patch_size));
-    CUDA_CHECK(cudaMalloc(&d_patch_grad_y, patch_size));
-    CUDA_CHECK(cudaMalloc(&d_patch_error, patch_size));
+    CUDA_CHECK(cudaMallocAsync(&d_template_patch, patch_size, streams[0]));
+    CUDA_CHECK(cudaMallocAsync(&d_patch, patch_size, streams[0]));
+    CUDA_CHECK(cudaMallocAsync(&d_patch_grad_x, patch_size, streams[0]));
+    CUDA_CHECK(cudaMallocAsync(&d_patch_grad_y, patch_size, streams[0]));
+    CUDA_CHECK(cudaMallocAsync(&d_patch_error, patch_size, streams[0]));
 
     prev_pts = pts;
     next_pts = std::vector<cv::Point2f>(pts.size(), cv::Point2f(0, 0));
@@ -502,7 +504,7 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
      * Convert BGR to grayscale
      * next_bgr is on pageable memory
      */
-    CUDA_CHECK(cudaMemcpy(d_bgr, next_bgr.data, bgrStepBytes * height, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpyAsync(d_bgr, next_bgr.data, bgrStepBytes * height, cudaMemcpyHostToDevice, streams[0]));
     apply_bgr_to_gray(d_bgr, d_gray, bgrStepBytes, grayStepBytes, width, height, streams[0]);
     // DEBUG
     // save_device_image<Npp8u, CV_8UC1>(d_gray, width, height, "d_gray.png");
@@ -571,28 +573,30 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
 
 SparseOpticalFlow::~SparseOpticalFlow() {
     // Free GPU memory
-    CUDA_CHECK(cudaFree(d_bgr));
-    CUDA_CHECK(cudaFree(d_gray));
+    CUDA_CHECK(cudaFreeAsync(d_bgr, streams[0]));
+    CUDA_CHECK(cudaFreeAsync(d_gray, streams[0]));
 
     for (auto &d_pyr : d_pyr1) {
-        CUDA_CHECK(cudaFree(d_pyr));
+        CUDA_CHECK(cudaFreeAsync(d_pyr, streams[0]));
     }
     for (auto &d_pyr : d_pyr2) {
-        CUDA_CHECK(cudaFree(d_pyr));
+        CUDA_CHECK(cudaFreeAsync(d_pyr, streams[0]));
     }
 
     for (auto &d_grad : d_grad_x) {
-        CUDA_CHECK(cudaFree(d_grad));
+        CUDA_CHECK(cudaFreeAsync(d_grad, streams[0]));
     }
     for (auto &d_grad : d_grad_y) {
-        CUDA_CHECK(cudaFree(d_grad));
+        CUDA_CHECK(cudaFreeAsync(d_grad, streams[0]));
     }
 
-    CUDA_CHECK(cudaFree(d_template_patch));
-    CUDA_CHECK(cudaFree(d_patch));
-    CUDA_CHECK(cudaFree(d_patch_grad_x));
-    CUDA_CHECK(cudaFree(d_patch_grad_y));
-    CUDA_CHECK(cudaFree(d_patch_error));
+    CUDA_CHECK(cudaFreeAsync(d_template_patch, streams[0]));
+    CUDA_CHECK(cudaFreeAsync(d_patch, streams[0]));
+    CUDA_CHECK(cudaFreeAsync(d_patch_grad_x, streams[0]));
+    CUDA_CHECK(cudaFreeAsync(d_patch_grad_y, streams[0]));
+    CUDA_CHECK(cudaFreeAsync(d_patch_error, streams[0]));
+
+    CUDA_CHECK(cudaStreamSynchronize(streams[0]));
 
     // Destroy CUDA streams
     for (auto &stream : streams) {
@@ -616,6 +620,9 @@ void plot_trajectory(cv::Mat &display, const std::vector<std::vector<cv::Point2f
 }
 
 int main(int argc, char **argv) {
+    // Use pinned host memory for cv::Mat
+    cv::Mat::setDefaultAllocator(cv::cuda::HostMem::getAllocator(cv::cuda::HostMem::AllocType::PAGE_LOCKED));
+
     std::string input_mp4 = "data/1920x1080_30fps_8s.mp4";
     std::string output_mp4 = "output/tracker_cuda_naive.mp4";
 
@@ -657,7 +664,9 @@ int main(int argc, char **argv) {
     SparseOpticalFlow sof(prev_pts, prev_gray);
 
     long long accum_time = 0;
-    cv::Mat next_bgr;
+
+    cv::cuda::HostMem h_frame(height, width, CV_8UC3, cv::cuda::HostMem::AllocType::PAGE_LOCKED);
+    cv::Mat next_bgr = h_frame.createMatHeader();
     while (true) {
         if (!cap.read(next_bgr))
             break;
@@ -684,5 +693,7 @@ int main(int argc, char **argv) {
 
     cap.release();
     writer.release();
+    CUDA_CHECK(cudaDeviceSynchronize()); // Wait for compute device to finish.
+
     return 0;
 }
