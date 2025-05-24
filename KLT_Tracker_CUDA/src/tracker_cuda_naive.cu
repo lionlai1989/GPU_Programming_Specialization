@@ -647,6 +647,7 @@ int main(int argc, char **argv) {
         return -1;
     }
     int total_frames = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+    std::cout << "Total frames: " << total_frames << std::endl;
 
     cv::Mat prev_bgr, prev_gray;
     cap.read(prev_bgr);
