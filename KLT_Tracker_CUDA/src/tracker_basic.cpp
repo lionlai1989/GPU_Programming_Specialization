@@ -24,7 +24,7 @@ std::tuple<float, float, bool> lucas_kanade(const cv::Mat &img1, const cv::Mat &
     cv::getRectSubPix(img1, cv::Size(origin_win_size, origin_win_size), {x_l, y_l}, template_patch);
     template_patch.convertTo(template_patch, CV_32F); // uint8 to float32
     assert(template_patch.type() == CV_32F);
-    // DEBUG: save template_patch to temp output
+    // DEBUG
     // cv::imwrite("tracker_basic_template_patch.png", template_patch);
 
     bool success = true;
@@ -47,7 +47,7 @@ std::tuple<float, float, bool> lucas_kanade(const cv::Mat &img1, const cv::Mat &
         cv::getRectSubPix(grad_y, cv::Size(origin_win_size, origin_win_size), {xc, yc}, patch_grad_y);
         patch.convertTo(patch, CV_32F); // uint8 to float32
         assert(patch.type() == CV_32F);
-        // DEBUG: save patch to temp output
+        // DEBUG
         // cv::imwrite("tracker_basic_patch.png", patch);
 
         // Compute error image (template - patch)
@@ -224,7 +224,7 @@ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
         cv::Sobel(pyr2[lvl], pyr2_grad_x[lvl], CV_32F, 1, 0, 3);
         cv::Sobel(pyr2[lvl], pyr2_grad_y[lvl], CV_32F, 0, 1, 3);
     }
-    // DEBUG: save pyr2_grad_x and pyr2_grad_y to temp output
+    // DEBUG
     // cv::imwrite("tracker_basic_pyr2_grad_x0.png", pyr2_grad_x[0]);
     // cv::imwrite("tracker_basic_pyr2_grad_y0.png", pyr2_grad_y[0]);
     // cv::imwrite("tracker_basic_pyr2_grad_x3.png", pyr2_grad_x[3]);

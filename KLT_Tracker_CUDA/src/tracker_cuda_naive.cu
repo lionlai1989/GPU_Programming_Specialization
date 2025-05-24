@@ -49,6 +49,13 @@
         exit(EXIT_FAILURE);                                                                                            \
     }
 
+template <typename T, int CV_TYPE>
+__host__ void save_device_image(const T *d_ptr, int width, int height, const std::string &filename) {
+    cv::Mat h_mat(height, width, CV_TYPE);
+    CUDA_CHECK(cudaMemcpy(h_mat.data, d_ptr, size_t(width) * height * sizeof(T), cudaMemcpyDeviceToHost));
+    cv::imwrite(filename, h_mat);
+}
+
 __host__ __device__ static inline bool in_bound(const float x, const float y, const int half_win, const int width,
                                                 const int height) {
     return x >= half_win && x < width - half_win && y >= half_win && y < height - half_win;
@@ -93,10 +100,8 @@ __host__ void cudaGetRectSubPix(const float *img, int win_size, float center_x, 
     int threads = 256;
     int blocks = (N + threads - 1) / threads;
 
-    // launch kernel on given stream
     getRectSubPixKernel<<<blocks, threads, 0, stream>>>(img, width, height, center_x, center_y, patch, win_size);
 
-    // optionally synchronize here (if you need host‐ready immediately)
     cudaStreamSynchronize(stream);
 }
 
@@ -160,11 +165,8 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp8u *d_img1, const 
 
     // Extract the template patch from I1 (no motion yet)
     cudaGetRectSubPix(d_img1_32f, origin_win_size, x_l, y_l, d_template_patch, width, height, stream);
-    // DEBUG: save d_template_patch to temp output
-    // cv::Mat d_template_patch_host(origin_win_size, origin_win_size, CV_32FC1);
-    // CUDA_CHECK(cudaMemcpy(d_template_patch_host.data, d_template_patch,
-    //                       origin_win_size * origin_win_size * sizeof(Npp32f), cudaMemcpyDeviceToHost));
-    // cv::imwrite("tracker_cuda_naive_template_patch.png", d_template_patch_host);
+    // DEBUG
+    // save_device_image<Npp32f, CV_32FC1>(d_template_patch, origin_win_size, origin_win_size, "template_patch.png");
 
     bool success = true;
 
@@ -186,25 +188,14 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp8u *d_img1, const 
 
         // Sample the patch in I2 and the gradients at (xc, yc)
         cudaGetRectSubPix(d_img2_32f, origin_win_size, xc, yc, d_patch, width, height, stream);
-        // DEBUG: save d_patch to temp output
-        // cv::Mat d_img2_32f_host(height, width, CV_32FC1);
-        // CUDA_CHECK(
-        //     cudaMemcpy(d_img2_32f_host.data, d_img2_32f, width * height * sizeof(Npp32f), cudaMemcpyDeviceToHost));
-        // cv::imwrite("tracker_cuda_naive_d_img2_32f.png", d_img2_32f_host);
-        // cv::Mat d_patch_host(origin_win_size, origin_win_size, CV_32FC1);
-        // CUDA_CHECK(cudaMemcpy(d_patch_host.data, d_patch, origin_win_size * origin_win_size * sizeof(Npp32f),
-        //                       cudaMemcpyDeviceToHost));
-        // cv::imwrite("tracker_cuda_naive_patch.png", d_patch_host);
+        // DEBUG
+        // save_device_image<Npp32f, CV_32FC1>(d_patch, origin_win_size, origin_win_size, "patch.png");
 
         cudaGetRectSubPix(d_grad_x, origin_win_size, xc, yc, d_patch_grad_x, width, height, stream);
         cudaGetRectSubPix(d_grad_y, origin_win_size, xc, yc, d_patch_grad_y, width, height, stream);
 
         // Compute error image (template - patch)
         cudaVecSub(d_patch, d_template_patch, d_error, origin_win_size, stream);
-
-        // error = error.reshape(1, error.total());                    // ravel()
-        // cv::Mat gx = patch_grad_x.reshape(1, patch_grad_x.total()); // ravel()
-        // cv::Mat gy = patch_grad_y.reshape(1, patch_grad_y.total()); // ravel()
 
         // Build elements of the normal equations matrix
         float Gxx = cudaComputeDot(d_patch_grad_x, d_patch_grad_x, origin_win_size, stream, cublasH);
@@ -321,30 +312,34 @@ __host__ void build_pyramid(std::vector<Npp8u *> &pyr, int levels, const int wid
 
     // TODO: use NPP to replace cv::cuda::pyrDown
     // for (int i = 0; i < levels; i++) { // 0, 1, 2
-    //     const int src_width = width >> i;
-    //     const int src_height = height >> i;
-    //     assert(src_width % 2 == 0 && src_height % 2 == 0);
+    //     int src_w = width >> i;
+    //     int src_h = height >> i;
+    //     int dst_w = width >> (i + 1);
+    //     int dst_h = height >> (i + 1);
 
-    //     const int dst_width = width >> (i + 1);
-    //     const int dst_height = height >> (i + 1);
-    //     assert(dst_width % 2 == 0 && dst_height % 2 == 0);
+    //     int srcStep = src_w * sizeof(Npp8u);
+    //     int dstStep = dst_w * sizeof(Npp8u);
 
-    //     NppStreamContext ctx;
-    //     ctx.hStream = stream;
+    //     NppiSize srcSize = {src_w, src_h};
+    //     NppiPoint srcOffset = {0, 0};
+    //     NppiSize dstSize = {dst_w, dst_h};
+
+    //     // Gaussian blur + downsample with default 5-tap kernel
     //     NPP_CHECK(nppiFilterGaussPyramidLayerDownBorder_8u_C1R_Ctx(
-    //         /* pSrc */ pyr[i],
-    //         /* nSrcStep */ src_width * sizeof(Npp8u), // Convert to bytes
-    //         /* oSrcSize */ {src_width, src_height},
-    //         /* oSrcOffset */ {0, 0},
-    //         /* pDst */ pyr[i + 1],
-    //         /* nDstStep */ dst_width * sizeof(Npp8u), // Convert to bytes
-    //         /* oSizeROI */ {dst_width, dst_height},
-    //         /* nRate */ 0.5f,
-    //         /* nFilterTaps */ 5,
-    //         /* pKernel */ nullptr,
-    //         /* eBorderType */ NPP_BORDER_REPLICATE,
-    //         /* nppStreamCtx */ ctx));
+    //         /* pSrc           */ pyr[i],
+    //         /* nSrcStep       */ srcStep,
+    //         /* oSrcSize       */ srcSize,
+    //         /* oSrcOffset     */ srcOffset,
+    //         /* pDst           */ pyr[i + 1],
+    //         /* nDstStep       */ dstStep,
+    //         /* oSizeROI       */ dstSize,
+    //         /* nRate          */ 0.5f, // downsample factor
+    //         /* nFilterTaps    */ 0,    // 0 = use internal default (5 taps)
+    //         /* pKernel        */ nullptr,
+    //         /* eBorderType    */ NPP_BORDER_REPLICATE,
+    //         /* nppStreamCtx   */ ctx));
     // }
+    // cudaStreamSynchronize(stream);
 }
 
 __host__ void apply_sobel_filter(Npp8u *src, Npp32f *grad_x, Npp32f *grad_y, int width, int height,
@@ -452,14 +447,11 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
     // Build initial pyramid d_pyr1
     CUDA_CHECK(cudaMemcpy(d_pyr1[0], init_gray.data, grayBytes, cudaMemcpyHostToDevice));
     build_pyramid(d_pyr1, levels, width, height, streams[0]);
-    // DEBUG: save pyramid to temp output
+    // DEBUG
     // for (int i = 0; i <= levels; i++) {
     //     const int pyr_width = width >> i;
     //     const int pyr_height = height >> i;
-    //     size_t pyr_size = pyr_width * pyr_height * sizeof(Npp8u);
-    //     cv::Mat temp(pyr_height, pyr_width, CV_8UC1);
-    //     CUDA_CHECK(cudaMemcpy(temp.data, d_pyr1[i], pyr_size, cudaMemcpyDeviceToHost));
-    //     cv::imwrite("pyr1_" + std::to_string(i) + ".png", temp);
+    //     save_device_image<Npp8u, CV_8UC1>(d_pyr1[i], pyr_width, pyr_height, "pyr1_" + std::to_string(i) + ".png");
     // }
 
     // Allocate GPU memory for d_grad_x and d_grad_y
@@ -510,33 +502,29 @@ __host__ void apply_bgr_to_gray(Npp8u *src, Npp8u *dst, size_t srcStep, size_t d
 }
 
 __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
-
     int width = next_bgr.cols;
     int height = next_bgr.rows;
     size_t bgrStepBytes = next_bgr.step[0];
     assert(bgrStepBytes == width * 3u);
     size_t grayStepBytes = width * sizeof(Npp8u);
 
-    // Convert BGR to grayscale
+    /**
+     * Convert BGR to grayscale
+     * next_bgr is on pageable memory
+     */
     CUDA_CHECK(cudaMemcpy(d_bgr, next_bgr.data, bgrStepBytes * height, cudaMemcpyHostToDevice));
     apply_bgr_to_gray(d_bgr, d_gray, bgrStepBytes, grayStepBytes, width, height);
-    // DEBUG: save d_gray to temp output
-    // cv::Mat temp(height, width, CV_8UC1);
-    // CUDA_CHECK(cudaMemcpy(temp.data, d_gray, grayStepBytes * height, cudaMemcpyDeviceToHost));
-    // cv::imwrite("d_gray.png", temp);
+    // DEBUG
+    // save_device_image<Npp8u, CV_8UC1>(d_gray, width, height, "d_gray.png");
 
     // Build pyramid pyr2
     CUDA_CHECK(cudaMemcpy(d_pyr2[0], d_gray, grayStepBytes * height, cudaMemcpyDeviceToDevice));
     build_pyramid(this->d_pyr2, levels, width, height, streams[0]);
-    // DEBUG: save pyr2 to temp output
+    // DEBUG
     // for (int i = 0; i <= levels; i++) {
-    //     std::cout << "i: " << i << std::endl;
     //     const int pyr_width = width >> i;
     //     const int pyr_height = height >> i;
-    //     size_t pyr_size = pyr_width * pyr_height * sizeof(Npp8u);
-    //     cv::Mat temp(pyr_height, pyr_width, CV_8UC1);
-    //     CUDA_CHECK(cudaMemcpy(temp.data, d_pyr2[i], pyr_size, cudaMemcpyDeviceToHost));
-    //     cv::imwrite("pyr2_" + std::to_string(i) + ".png", temp);
+    //     save_device_image<Npp8u, CV_8UC1>(d_pyr2[i], pyr_width, pyr_height, "pyr2_" + std::to_string(i) + ".png");
     // }
 
     CUDA_CHECK(cudaStreamSynchronize(streams[0]));
@@ -548,19 +536,15 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
         apply_sobel_filter(this->d_pyr2[i], this->d_grad_x[i], this->d_grad_y[i], pyr_width, pyr_height, streams[0]);
     }
     CUDA_CHECK(cudaStreamSynchronize(streams[0]));
-    // DEBUG: save the first and lastlevel of d_grad_x and d_grad_y to temp output
-    // size_t grad_size = width * height * sizeof(Npp32f);
-    // cv::Mat temp0(height, width, CV_32FC1);
-    // CUDA_CHECK(cudaMemcpy(temp0.data, d_grad_x[0], grad_size, cudaMemcpyDeviceToHost));
-    // cv::imwrite("tracker_cuda_naive_d_grad_x0.png", temp0);
-    // CUDA_CHECK(cudaMemcpy(temp0.data, d_grad_y[0], grad_size, cudaMemcpyDeviceToHost));
-    // cv::imwrite("tracker_cuda_naive_d_grad_y0.png", temp0);
-    // grad_size = (width >> 3) * (height >> 3) * sizeof(Npp32f);
-    // cv::Mat temp3(height >> 3, width >> 3, CV_32FC1);
-    // CUDA_CHECK(cudaMemcpy(temp3.data, d_grad_x[3], grad_size, cudaMemcpyDeviceToHost));
-    // cv::imwrite("tracker_cuda_naive_d_grad_x3.png", temp3);
-    // CUDA_CHECK(cudaMemcpy(temp3.data, d_grad_y[3], grad_size, cudaMemcpyDeviceToHost));
-    // cv::imwrite("tracker_cuda_naive_d_grad_y3.png", temp3);
+    // DEBUG
+    // for (int i = 0; i <= levels; i++) {
+    //     const int pyr_width = width >> i;
+    //     const int pyr_height = height >> i;
+    //     save_device_image<Npp32f, CV_32FC1>(d_grad_x[i], pyr_width, pyr_height,
+    //                                         "d_grad_x_" + std::to_string(i) + ".png");
+    //     save_device_image<Npp32f, CV_32FC1>(d_grad_y[i], pyr_width, pyr_height,
+    //                                         "d_grad_y_" + std::to_string(i) + ".png");
+    // }
 
     // Track each point in parallel using separate CUDA streams
     for (size_t i = 0; i < prev_pts.size(); ++i) {
