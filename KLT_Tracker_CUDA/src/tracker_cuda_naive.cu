@@ -604,6 +604,7 @@ SparseOpticalFlow::~SparseOpticalFlow() {
     CUDA_CHECK(cudaFree(d_patch));
     CUDA_CHECK(cudaFree(d_patch_grad_x));
     CUDA_CHECK(cudaFree(d_patch_grad_y));
+    CUDA_CHECK(cudaFree(d_patch_error));
 
     // Destroy CUDA streams
     for (auto &stream : streams) {
