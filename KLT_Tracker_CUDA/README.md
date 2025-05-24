@@ -43,7 +43,6 @@ rm -rf build/ && cmake -S . -B build/ && cmake --build build/ -j 8
 
 # CUDA variants
 ./build/tracker_cuda_naive
-./build/tracker_cuda_async
 ```
 
 
