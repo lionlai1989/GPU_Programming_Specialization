@@ -38,11 +38,12 @@ rm -rf build/ && cmake -S . -B build/ && cmake --build build/ -j 8
 # CPU OpenCV baseline
 ./build/tracker_opencv
 
-# CPU tutorial baseline. 
+# CPU tutorial baseline.
 ./build/tracker_basic
 
 # CUDA variants
 ./build/tracker_cuda_naive
+./build/tracker_cuda_lk
 ```
 
 
@@ -53,9 +54,15 @@ nsys profile \
 --trace=cuda,nvtx,osrt \
 --trace-fork-before-exec=true \
 --output=tracker_cuda_naive \
-./build/tracker_cuda_naive
+./build/tracker_cuda_naive \
+&& nsys stats tracker_cuda_naive.nsys-rep
 
-nsys stats tracker_cuda_naive.nsys-rep
+nsys profile \
+--trace=cuda,nvtx,osrt \
+--trace-fork-before-exec=true \
+--output=tracker_cuda_lk \
+./build/tracker_cuda_lk \
+&& nsys stats tracker_cuda_lk.nsys-rep
 ```
 
 Use NVIDIA Nsight Systems to identify kernel and transfer bottlenecks:

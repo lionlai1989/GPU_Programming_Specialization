@@ -1,14 +1,9 @@
 /**
- * tracker_cuda_naive.cu implements the KLT tracker with CUDA from scratch. It's based on the implementation in
- * tracker_basic.cpp.
+ * tracker_cuda_lk.cu implements the KLT tracker with CUDA from scratch. It's based on the implementation in
+ * tracker_cuda_naive.cu.
  *
- * It tries to follow the points below in the implementation:
- * 1. Encapsulate the reused memory in the class
- * 2. Pre-allocate the required memory in the constructor.
- * 3. For each point, use one cuda stream to track
- * 4. Use cuda library to replace cv.
- * 5. Use pinned host memory for cv::Mat so that cuda async version of cuda library can be used.
- * 6. Use async version of cuda functions such that everything can be run asynchronously.
+ * It follows the following points in the implementation:
+ * 1. `lucas_kanade` runs on the device wholely.
  *
  */
 
@@ -620,7 +615,7 @@ int main(int argc, char **argv) {
     cv::Mat::setDefaultAllocator(cv::cuda::HostMem::getAllocator(cv::cuda::HostMem::AllocType::PAGE_LOCKED));
 
     std::string input_mp4 = "data/1920x1080_30fps_8s.mp4";
-    std::string output_mp4 = "output/tracker_cuda_naive.mp4";
+    std::string output_mp4 = "output/tracker_cuda_lk.mp4";
 
     std::vector<cv::Point2f> prev_pts;
     prev_pts.push_back(cv::Point2f(1676, 654));

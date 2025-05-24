@@ -48,6 +48,7 @@ find_package(CUDA REQUIRED)
 add_executable(tracker_basic src/tracker_basic.cpp)
 add_executable(tracker_opencv src/tracker_opencv.cpp)
 add_executable(tracker_cuda_naive src/tracker_cuda_naive.cu)
+add_executable(tracker_cuda_lk src/tracker_cuda_lk.cu)
 
 # For OpenCV version
 foreach(target tracker_basic tracker_opencv)
@@ -64,7 +65,7 @@ foreach(target tracker_basic tracker_opencv)
 endforeach()
 
 # For CUDA version
-foreach(target tracker_cuda_naive)
+foreach(target tracker_cuda_naive tracker_cuda_lk)
     target_link_libraries(${target} PRIVATE
         ${OpenCV_LIBS}
         opencv_core
