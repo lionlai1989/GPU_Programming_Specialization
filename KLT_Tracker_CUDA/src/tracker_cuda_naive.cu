@@ -151,7 +151,6 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp32f *d_img1, const
     ctx.hStream = stream;
 
     cudaGetRectSubPix(d_img1, origin_win_size, x_l, y_l, d_template_patch, width, height, stream);
-    CUDA_CHECK(cudaStreamSynchronize(stream));
     // DEBUG
     // save_device_image<Npp32f, CV_32FC1>(d_template_patch, origin_win_size, origin_win_size, "template_patch.png");
 
@@ -220,8 +219,6 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp32f *d_img1, const
         if (std::abs(du) < eps && std::abs(dv) < eps) {
             break;
         }
-
-        CUDA_CHECK(cudaStreamSynchronize(stream));
     }
 
     return std::make_tuple(u, v, success);
@@ -439,7 +436,6 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
     NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_gray, width * sizeof(Npp8u), d_pyr1[0], width * sizeof(Npp32f),
                                         {width, height}, main_npp_ctx));
     build_pyramid(d_pyr1, levels, width, height, streams[0]);
-    CUDA_CHECK(cudaStreamSynchronize(streams[0]));
     // DEBUG
     // for (int i = 0; i <= levels; i++) {
     //     const int pyr_width = width >> i;
@@ -466,6 +462,8 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
 
     prev_pts = pts;
     next_pts = std::vector<cv::Point2f>(pts.size(), cv::Point2f(0, 0));
+
+    CUDA_CHECK(cudaStreamSynchronize(streams[0])); // sync main stream
 }
 
 __global__ void bgr_to_gray(const unsigned char *src, unsigned char *dst, size_t srcStep, size_t dstStep, int width,
@@ -514,7 +512,6 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
     NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_gray, width * sizeof(Npp8u), d_pyr2[0], width * sizeof(Npp32f),
                                         {width, height}, main_npp_ctx));
     build_pyramid(this->d_pyr2, levels, width, height, streams[0]);
-    CUDA_CHECK(cudaStreamSynchronize(streams[0])); // sync main stream
     // DEBUG
     // for (int i = 0; i <= levels; i++) {
     //     const int pyr_width = width >> i;
@@ -528,7 +525,6 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
         const int pyr_height = height >> i;
         apply_sobel_filter(this->d_pyr2[i], this->d_grad_x[i], this->d_grad_y[i], pyr_width, pyr_height, streams[0]);
     }
-    CUDA_CHECK(cudaStreamSynchronize(streams[0]));
     // DEBUG
     // for (int i = 0; i <= levels; i++) {
     //     const int pyr_width = width >> i;
@@ -538,6 +534,8 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
     //     save_device_image<Npp32f, CV_32FC1>(d_grad_y[i], pyr_width, pyr_height,
     //                                         "d_grad_y_" + std::to_string(i) + ".png");
     // }
+
+    CUDA_CHECK(cudaStreamSynchronize(streams[0])); // sync main stream before tracking points
 
     // Track each point in parallel using separate CUDA streams, start from stream 1
     for (size_t i = 0; i < prev_pts.size(); ++i) {
