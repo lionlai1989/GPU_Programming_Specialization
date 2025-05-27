@@ -136,8 +136,8 @@ __host__ void cudaComputeDot(const float *vec1, const float *vec2, float *result
 
 __host__ std::tuple<float, float, bool> lucas_kanade(const Npp32f *d_img1, const Npp32f *d_img2, const Npp32f *d_grad_x,
                                                      const Npp32f *d_grad_y, Npp32f *d_template_patch, Npp32f *d_patch,
-                                                     Npp32f *d_patch_grad_x, Npp32f *d_patch_grad_y,
-                                                     Npp32f *d_patch_error, float u, float v, float x_l, float y_l,
+                                                     Npp32f *d_grad_x_patch, Npp32f *d_grad_y_patch,
+                                                     Npp32f *d_error_patch, float u, float v, float x_l, float y_l,
                                                      float scaled_win_size, int origin_win_size, int max_iter,
                                                      float eps, float min_eig, int width, int height,
                                                      cudaStream_t stream, cublasHandle_t cublasH) {
@@ -165,17 +165,17 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp32f *d_img1, const
         // DEBUG
         // save_device_image<Npp32f, CV_32FC1>(d_patch, origin_win_size, origin_win_size, "patch.png");
 
-        cudaGetRectSubPix(d_grad_x, origin_win_size, xc, yc, d_patch_grad_x, width, height, stream);
-        cudaGetRectSubPix(d_grad_y, origin_win_size, xc, yc, d_patch_grad_y, width, height, stream);
+        cudaGetRectSubPix(d_grad_x, origin_win_size, xc, yc, d_grad_x_patch, width, height, stream);
+        cudaGetRectSubPix(d_grad_y, origin_win_size, xc, yc, d_grad_y_patch, width, height, stream);
 
         // Compute error image (template - patch)
-        cudaVecSub(d_patch, d_template_patch, d_patch_error, origin_win_size, stream);
+        cudaVecSub(d_patch, d_template_patch, d_error_patch, origin_win_size, stream);
 
         // Build elements of the normal equations matrix
         float Gxx = 0.0f, Gxy = 0.0f, Gyy = 0.0f;
-        cudaComputeDot(d_patch_grad_x, d_patch_grad_x, &Gxx, origin_win_size, stream, cublasH);
-        cudaComputeDot(d_patch_grad_x, d_patch_grad_y, &Gxy, origin_win_size, stream, cublasH);
-        cudaComputeDot(d_patch_grad_y, d_patch_grad_y, &Gyy, origin_win_size, stream, cublasH);
+        cudaComputeDot(d_grad_x_patch, d_grad_x_patch, &Gxx, origin_win_size, stream, cublasH);
+        cudaComputeDot(d_grad_x_patch, d_grad_y_patch, &Gxy, origin_win_size, stream, cublasH);
+        cudaComputeDot(d_grad_y_patch, d_grad_y_patch, &Gyy, origin_win_size, stream, cublasH);
 
         // Check for degeneracy and compute minimum eigenvalue
         float det = Gxx * Gyy - Gxy * Gxy;
@@ -196,8 +196,8 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp32f *d_img1, const
 
         // Compute right-hand side vector
         float b1 = 0.0f, b2 = 0.0f;
-        cudaComputeDot(d_patch_grad_x, d_patch_error, &b1, origin_win_size, stream, cublasH);
-        cudaComputeDot(d_patch_grad_y, d_patch_error, &b2, origin_win_size, stream, cublasH);
+        cudaComputeDot(d_grad_x_patch, d_error_patch, &b1, origin_win_size, stream, cublasH);
+        cudaComputeDot(d_grad_y_patch, d_error_patch, &b2, origin_win_size, stream, cublasH);
 
         // Solve for [du, dv] using Cramer's rule
         float inv_det = 1.0f / det;
@@ -217,11 +217,11 @@ __host__ std::tuple<float, float, bool> lucas_kanade(const Npp32f *d_img1, const
 }
 
 __host__ std::tuple<float, float, bool>
-pyramid_lucas_kanade(std::vector<Npp32f *> &d_pyr1, std::vector<Npp32f *> &d_pyr2, std::vector<Npp32f *> &d_grad_x,
-                     std::vector<Npp32f *> &d_grad_y, Npp32f *d_template_patch, Npp32f *d_patch, Npp32f *d_patch_grad_x,
-                     Npp32f *d_patch_grad_y, Npp32f *d_patch_error, const cv::Point2f &pt, int levels, int win_size,
-                     int max_iter, float eps, float min_eig, int width, int height, cudaStream_t stream,
-                     cublasHandle_t cublasH) {
+pyramid_lucas_kanade(const std::vector<Npp32f *> &d_pyr1, const std::vector<Npp32f *> &d_pyr2,
+                     const std::vector<Npp32f *> &d_grad_x, const std::vector<Npp32f *> &d_grad_y,
+                     Npp32f *d_template_patch, Npp32f *d_patch, Npp32f *d_grad_x_patch, Npp32f *d_grad_y_patch,
+                     Npp32f *d_error_patch, const cv::Point2f &pt, int levels, int win_size, int max_iter, float eps,
+                     float min_eig, int width, int height, cudaStream_t stream, cublasHandle_t cublasH) {
     float u_prev = 0.0;
     float v_prev = 0.0;
     bool success = true;
@@ -247,7 +247,7 @@ pyramid_lucas_kanade(std::vector<Npp32f *> &d_pyr1, std::vector<Npp32f *> &d_pyr
 
         auto [new_u, new_v, success] =
             lucas_kanade(d_pyr1[lvl], d_pyr2[lvl], d_grad_x[lvl], d_grad_y[lvl], d_template_patch, d_patch,
-                         d_patch_grad_x, d_patch_grad_y, d_patch_error, u, v, x_l, y_l, scale * win_size, win_size,
+                         d_grad_x_patch, d_grad_y_patch, d_error_patch, u, v, x_l, y_l, scale * win_size, win_size,
                          max_iter, eps, min_eig, pyr_width, pyr_height, stream, cublasH);
 
         if (!success) {
@@ -353,12 +353,14 @@ class SparseOpticalFlow {
     // GPU memory
     Npp8u *d_bgr, *d_gray;
 
+    // Read-only memory in the process of tracking
     std::vector<Npp32f *> d_pyr1, d_pyr2;
     std::vector<Npp32f *> d_grad_x, d_grad_y;
 
-    Npp32f *d_template_patch, *d_patch;
-    Npp32f *d_patch_grad_x, *d_patch_grad_y;
-    Npp32f *d_patch_error;
+    // Each tracking point has its own patch
+    std::vector<Npp32f *> d_template_patches, d_patches;
+    std::vector<Npp32f *> d_grad_x_patches, d_grad_y_patches;
+    std::vector<Npp32f *> d_error_patches;
 
     // CUDA streams for parallel processing
     std::vector<cudaStream_t> streams;
@@ -445,12 +447,20 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
         CUDA_CHECK(cudaMallocAsync(&d_grad_y[i], grad_size, streams[0]));
     }
 
+    // Each tracking point has its own patch
     size_t patch_size = win_size * win_size * sizeof(Npp32f);
-    CUDA_CHECK(cudaMallocAsync(&d_template_patch, patch_size, streams[0]));
-    CUDA_CHECK(cudaMallocAsync(&d_patch, patch_size, streams[0]));
-    CUDA_CHECK(cudaMallocAsync(&d_patch_grad_x, patch_size, streams[0]));
-    CUDA_CHECK(cudaMallocAsync(&d_patch_grad_y, patch_size, streams[0]));
-    CUDA_CHECK(cudaMallocAsync(&d_patch_error, patch_size, streams[0]));
+    d_template_patches.resize(pts.size());
+    d_patches.resize(pts.size());
+    d_grad_x_patches.resize(pts.size());
+    d_grad_y_patches.resize(pts.size());
+    d_error_patches.resize(pts.size());
+    for (size_t i = 0; i < pts.size(); i++) {
+        CUDA_CHECK(cudaMallocAsync(&d_template_patches[i], patch_size, streams[i + 1]));
+        CUDA_CHECK(cudaMallocAsync(&d_patches[i], patch_size, streams[i + 1]));
+        CUDA_CHECK(cudaMallocAsync(&d_grad_x_patches[i], patch_size, streams[i + 1]));
+        CUDA_CHECK(cudaMallocAsync(&d_grad_y_patches[i], patch_size, streams[i + 1]));
+        CUDA_CHECK(cudaMallocAsync(&d_error_patches[i], patch_size, streams[i + 1]));
+    }
 
     prev_pts = pts;
     next_pts = std::vector<cv::Point2f>(pts.size(), cv::Point2f(0, 0));
@@ -529,16 +539,17 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
 
     CUDA_CHECK(cudaStreamSynchronize(streams[0])); // sync main stream before tracking points
 
-    // Track each point in parallel using separate CUDA streams, start from stream 1
+    // Track each point in parallel using separate CUDA streams, start from stream 1.
+    // Thus, all streams can run simultaneously and asynchronously.
     for (size_t i = 0; i < prev_pts.size(); ++i) {
         float x = prev_pts[i].x;
         float y = prev_pts[i].y;
 
         // Pyramidal Lucas-Kanade
         auto [u, v, success] = pyramid_lucas_kanade(
-            this->d_pyr1, this->d_pyr2, this->d_grad_x, this->d_grad_y, this->d_template_patch, this->d_patch,
-            this->d_patch_grad_x, this->d_patch_grad_y, this->d_patch_error, prev_pts[i], levels, win_size, max_iter,
-            eps, min_eig, this->width, this->height, streams[i + 1], cublasH);
+            this->d_pyr1, this->d_pyr2, this->d_grad_x, this->d_grad_y, this->d_template_patches[i], this->d_patches[i],
+            this->d_grad_x_patches[i], this->d_grad_y_patches[i], this->d_error_patches[i], prev_pts[i], levels,
+            win_size, max_iter, eps, min_eig, this->width, this->height, streams[i + 1], cublasH);
 
         if (success) {
             next_pts[i].x = x + u;
@@ -581,11 +592,21 @@ SparseOpticalFlow::~SparseOpticalFlow() {
         CUDA_CHECK(cudaFreeAsync(d_grad, streams[0]));
     }
 
-    CUDA_CHECK(cudaFreeAsync(d_template_patch, streams[0]));
-    CUDA_CHECK(cudaFreeAsync(d_patch, streams[0]));
-    CUDA_CHECK(cudaFreeAsync(d_patch_grad_x, streams[0]));
-    CUDA_CHECK(cudaFreeAsync(d_patch_grad_y, streams[0]));
-    CUDA_CHECK(cudaFreeAsync(d_patch_error, streams[0]));
+    for (auto &d_template : d_template_patches) {
+        CUDA_CHECK(cudaFreeAsync(d_template, streams[0]));
+    }
+    for (auto &d_patch : d_patches) {
+        CUDA_CHECK(cudaFreeAsync(d_patch, streams[0]));
+    }
+    for (auto &d_grad : d_grad_x_patches) {
+        CUDA_CHECK(cudaFreeAsync(d_grad, streams[0]));
+    }
+    for (auto &d_grad : d_grad_y_patches) {
+        CUDA_CHECK(cudaFreeAsync(d_grad, streams[0]));
+    }
+    for (auto &d_error : d_error_patches) {
+        CUDA_CHECK(cudaFreeAsync(d_error, streams[0]));
+    }
 
     CUDA_CHECK(cudaStreamSynchronize(streams[0]));
 
