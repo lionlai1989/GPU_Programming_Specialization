@@ -544,7 +544,8 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
 
     CUDA_CHECK(cudaStreamSynchronize(streams[0])); // sync main stream before tracking points
 
-    // Track each point in parallel using separate CUDA streams, start from stream 1
+    // Track each point in parallel using separate CUDA streams, start from stream 1.
+    // Thus, all streams can run simultaneously and asynchronously.
     for (size_t i = 0; i < prev_pts.size(); ++i) {
         float x = prev_pts[i].x;
         float y = prev_pts[i].y;
