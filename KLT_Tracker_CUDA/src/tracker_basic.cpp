@@ -7,7 +7,6 @@
 #include <chrono>
 #include <iostream>
 #include <opencv2/opencv.hpp>
-#include <sstream>
 #include <vector>
 
 static inline bool in_bound(const float x, const float y, int half_win, const int width, const int height) {

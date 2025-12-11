@@ -34,7 +34,6 @@
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudawarping.hpp>
 #include <opencv2/opencv.hpp>
-#include <sstream>
 #include <tuple>
 #include <vector>
 

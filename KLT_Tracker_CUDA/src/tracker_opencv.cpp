@@ -6,7 +6,6 @@
 #include <chrono>
 #include <iostream>
 #include <opencv2/opencv.hpp>
-#include <sstream>
 #include <vector>
 
 void plot_trajectory(cv::Mat &display, const std::vector<std::vector<cv::Point2f>> &trajectory) {
