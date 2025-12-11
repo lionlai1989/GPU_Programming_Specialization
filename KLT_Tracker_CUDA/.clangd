@@ -1,0 +1,10 @@
+CompileFlags:
+  CompilationDatabase: build
+  Add: 
+    - "-std=c++17"
+    - "--cuda-path=/usr/local/cuda-12.4"
+    - "-I/usr/local/cuda-12.4/include"
+    - "-I/home/lai/GPU_Programming_Specialization/opencv-4.10.0/install_opencv/include/opencv4"
+
+Index:
+  Background: Build
