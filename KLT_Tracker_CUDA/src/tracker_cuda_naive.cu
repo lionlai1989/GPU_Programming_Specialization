@@ -754,11 +754,10 @@ int main(int argc, char **argv) {
         auto t2 = std::chrono::high_resolution_clock::now(); // end time
         accum_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 
-        for (size_t i = 0; i < prev_pts.size(); ++i) {
-            trajectory[i].push_back(next_pts[i]);
-        }
-
         // Uncomment to visualize the result
+        // for (size_t i = 0; i < prev_pts.size(); ++i) {
+        //     trajectory[i].push_back(next_pts[i]);
+        // }
         // cv::Mat display = next_bgr.clone();
         // plot_trajectory(display, trajectory);
         // writer.write(display);
