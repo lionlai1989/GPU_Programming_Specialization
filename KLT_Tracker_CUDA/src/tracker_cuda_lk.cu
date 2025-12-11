@@ -1,10 +1,6 @@
 /**
  * tracker_cuda_lk.cu implements the KLT tracker with CUDA from scratch. It's based on the implementation in
  * tracker_cuda_naive.cu.
- *
- * It follows the following points in the implementation:
- * 1. `lucas_kanade` runs on the device wholely.
- *
  */
 
 #include <cassert>
@@ -702,8 +698,6 @@ int main(int argc, char **argv) {
     prev_pts.push_back(cv::Point2f(1740, 699));
     prev_pts.push_back(cv::Point2f(1825, 690));
 
-    std::vector<cv::Point2f> next_pts;
-
     // Store all tracked points for visualization
     std::vector<std::vector<cv::Point2f>> trajectory(prev_pts.size());
 
@@ -750,11 +744,10 @@ int main(int argc, char **argv) {
         auto t2 = std::chrono::high_resolution_clock::now(); // end time
         accum_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 
-        for (size_t i = 0; i < prev_pts.size(); ++i) {
-            trajectory[i].push_back(next_pts[i]);
-        }
-
         // Uncomment to visualize the result
+        // for (size_t i = 0; i < prev_pts.size(); ++i) {
+        //     trajectory[i].push_back(next_pts[i]);
+        // }
         // cv::Mat display = next_bgr.clone();
         // plot_trajectory(display, trajectory);
         // writer.write(display);

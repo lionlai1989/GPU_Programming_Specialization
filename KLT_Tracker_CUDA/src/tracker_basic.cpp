@@ -302,8 +302,6 @@ int main(int argc, char **argv) {
     prev_pts.push_back(cv::Point2f(1740, 699));
     prev_pts.push_back(cv::Point2f(1825, 690));
 
-    std::vector<cv::Point2f> next_pts;
-
     // Store all tracked points for visualization
     std::vector<std::vector<cv::Point2f>> trajectory(prev_pts.size());
 
