@@ -1,26 +1,28 @@
 cmake_minimum_required(VERSION 3.10)
 
 # First find CUDA before project() to ensure proper compiler detection
-find_program(CUDA_NVCC_EXECUTABLE nvcc
+find_program(CMAKE_CUDA_COMPILER nvcc
     PATHS
-    /usr/local/cuda-11.8/bin
+    /usr/local/cuda-12.4/bin
     /usr/local/cuda/bin
     ENV PATH
     NO_DEFAULT_PATH
 )
 
 
-if(NOT CUDA_NVCC_EXECUTABLE)
+if(NOT CMAKE_CUDA_COMPILER)
     message(FATAL_ERROR "CUDA compiler (nvcc) not found. Please ensure CUDA is installed and nvcc is in your PATH.")
 endif()
 
 project(rgb2gray LANGUAGES CXX CUDA)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Set CUDA architecture
 set(CMAKE_CUDA_ARCHITECTURES 86)  # Adjust this based on your GPU architecture
 
 # Set OpenCV paths
-set(OpenCV_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../opencv-4.7.0/install_opencv/lib/cmake/opencv4")
+set(OpenCV_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../opencv-4.10.0/install_opencv/lib/cmake/opencv4")
 
 # Find OpenCV package
 find_package(OpenCV REQUIRED COMPONENTS 
