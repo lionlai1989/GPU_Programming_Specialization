@@ -136,7 +136,7 @@ void Barber::operator()() {
     std::cout << "[Barber " << id << "] is going home.\n";
 }
 
-// g++ 02-sleeping_barber.cpp -std=c++17 -pthread -Wall -Wextra && ./a.out
+// g++ -std=c++17 -pthread -Wall -Wextra -pedantic 02-sleeping_barber.cpp && ./a.out
 int main() {
     constexpr int NUM_BARBERS = 3;
     constexpr int NUM_CHAIRS = 5;

@@ -101,7 +101,7 @@ class Smoker {
     }
 };
 
-// g++ 03-cigarette_smokers.cpp -std=c++20 -pthread -Wall -Wextra && ./a.out
+// g++ -std=c++20 -pthread -Wall -Wextra -pedantic 03-cigarette_smokers.cpp && ./a.out
 int main() {
     std::cout << "=== Cigarette Smokers Problem ===\n";
 
