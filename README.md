@@ -18,7 +18,7 @@ My CUDA implementation is **3× faster** than OpenCV, even with OpenCV already u
 
 ## Prerequisites
 
-All code is tested on **Ubuntu 22.04**, using **CUDA 11.8** and **OpenCV 4.7.0**.
+All code is tested on **Ubuntu 22.04**, using **CUDA 12.4** and **OpenCV 4.10.0**.
 
 My laptop has one GPU "NVIDIA RTX A3000" and one Intel CPU with 16 CPUs and 32 GB RAM.
 ```
@@ -29,29 +29,29 @@ CPU(s):                   16
     Socket(s):            1
 ```
 
-### CUDA Toolkit 11.8
+### CUDA Toolkit 12.4
 
 Make sure CUDA is installed and environment variables are set:
 
 ```bash
-export PATH=/usr/local/cuda-11.8/bin:$PATH
-export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH
+export PATH=/usr/local/cuda-12.4/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$LD_LIBRARY_PATH
 ```
 
-### OpenCV 4.7.0 (with FFMPEG + CUDA support)
+### OpenCV 4.10.0 (with FFMPEG + CUDA support)
 
 ```bash
 # Install FFMPEG and dependencies
 sudo apt update && sudo apt install -y libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libgtk2.0-dev libcanberra-gtk-module
 
 # Download opencv and opencv_contrib
-wget -O opencv.zip https://github.com/opencv/opencv/archive/refs/tags/4.7.0.zip \
-&& wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/refs/tags/4.7.0.zip
+wget -O opencv.zip https://github.com/opencv/opencv/archive/refs/tags/4.10.0.zip \
+&& wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/refs/tags/4.10.0.zip
 
 # Extract both
 unzip opencv.zip && unzip opencv_contrib.zip
 
-cd opencv-4.7.0
+cd opencv-4.10.0
 
 # Build and install
 rm -rf build/ install_opencv/ \
@@ -59,6 +59,8 @@ rm -rf build/ install_opencv/ \
       -GNinja \
       -DCMAKE_INSTALL_PREFIX=./install_opencv \
       -DCMAKE_BUILD_TYPE=RELEASE \
+      -DCMAKE_CXX_STANDARD=17 \
+      -DCMAKE_CUDA_STANDARD=17 \
       -DWITH_CUDA=ON \
       -DWITH_FFMPEG=ON \
       -DWITH_OPENMP=ON \
@@ -70,7 +72,7 @@ rm -rf build/ install_opencv/ \
       -DBUILD_PERF_TESTS=OFF \
       -DBUILD_EXAMPLES=OFF \
       -DOPENCV_GENERATE_PKGCONFIG=ON \
-      -DOPENCV_EXTRA_MODULES_PATH=../opencv_contrib-4.7.0/modules \
+      -DOPENCV_EXTRA_MODULES_PATH=../opencv_contrib-4.10.0/modules \
       -DBUILD_LIST=core,cudev,imgproc,imgcodecs,videoio,highgui,video,cudaarithm,cudafilters,cudaimgproc,cudawarping \
 && cmake --build build/ --parallel $(nproc) && cmake --install build/
 ```
