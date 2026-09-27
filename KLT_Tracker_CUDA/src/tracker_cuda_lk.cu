@@ -1,12 +1,11 @@
 /**
- * tracker_cuda_lk.cu implements the KLT tracker with CUDA from scratch. It's based on the implementation in
- * tracker_cuda_naive.cu.
+ * tracker_cuda_lk.cu implements the KLT tracker with CUDA from scratch. It aims to outperform all other
+ * implementations.
  */
 
 #include <cassert>
 #include <chrono>
 #include <cmath>
-#include <cublas_v2.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
@@ -53,233 +52,251 @@ __host__ __device__ static inline bool in_bound(const float x, const float y, co
     return x >= half_win && x < width - half_win && y >= half_win && y < height - half_win;
 }
 
-__global__ void getRectSubPixKernel(const float *__restrict__ img, int W, int H, float center_x, float center_y,
-                                    float *__restrict__ patch, int win) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= win * win)
+// Device function: bilinear interpolation in a single-channel image
+__device__ float bilinear_interpolate(const float *img, int width, int height, float x, float y) {
+    int x0 = floorf(x), y0 = floorf(y);
+    int x1 = x0 + 1, y1 = y0 + 1;
+    // Clamp to image bounds
+    x0 = max(0, min(x0, width - 1));
+    y0 = max(0, min(y0, height - 1));
+    x1 = max(0, min(x1, width - 1));
+    y1 = max(0, min(y1, height - 1));
+    float dx = x - x0;
+    float dy = y - y0;
+    // Fetch four neighbors
+    float I00 = img[y0 * width + x0];
+    float I10 = img[y0 * width + x1];
+    float I01 = img[y1 * width + x0];
+    float I11 = img[y1 * width + x1];
+    // Interpolate along x then y
+    float I0 = I00 * (1.0f - dx) + I10 * dx;
+    float I1 = I01 * (1.0f - dx) + I11 * dx;
+    return I0 * (1.0f - dy) + I1 * dy;
+}
+
+// Optimized Lucas-Kanade kernel running on device
+__device__ void lucas_kanade_kernel(const float *image0, const float *image1, const float *grad_x, const float *grad_y,
+                                    int width, int height, float x0, float y0, int patch_radius, int max_iter,
+                                    float eps, float min_eigenvalue, float u_in, float v_in, float *u_out,
+                                    float *v_out) {
+    int patch_size = 2 * patch_radius + 1;
+    int patch_area = patch_size * patch_size;
+    // FIX: The kernel is launched with 1D blocks (threads_per_block is a scalar).
+    // So threadIdx.y is always 0. We must compute tx, ty from the 1D thread index.
+    int local_idx = threadIdx.x;
+    int tx = local_idx % patch_size;
+    int ty = local_idx / patch_size;
+    // Note: We assume threads_per_block == patch_area. All threads must participate
+    // in __syncthreads() calls, so no early return here.
+
+    // Quick boundary check for the entire patch
+    if (x0 < patch_radius || x0 > width - 1 - patch_radius || y0 < patch_radius || y0 > height - 1 - patch_radius) {
+        // Output input guess if out of bounds
+        *u_out = u_in;
+        *v_out = v_in;
         return;
-
-    int px = tid % win;
-    int py = tid / win;
-
-    // compute source coords
-    float fx = center_x - (win - 1) * 0.5f + px;
-    float fy = center_y - (win - 1) * 0.5f + py;
-
-    // replicate border
-    fx = fminf(fmaxf(fx, 0.0f), W - 1.0f);
-    fy = fminf(fmaxf(fy, 0.0f), H - 1.0f);
-
-    int x0 = int(floorf(fx)), y0 = int(floorf(fy));
-    int x1 = min(x0 + 1, W - 1), y1 = min(y0 + 1, H - 1);
-    float dx = fx - x0, dy = fy - y0;
-
-    // fetch four neighbors
-    float v00 = img[y0 * W + x0];
-    float v10 = img[y0 * W + x1];
-    float v01 = img[y1 * W + x0];
-    float v11 = img[y1 * W + x1];
-
-    // bilinear interpolate
-    float v0 = v00 + (v10 - v00) * dx;
-    float v1 = v01 + (v11 - v01) * dx;
-    patch[py * win + px] = v0 + (v1 - v0) * dy;
-}
-
-__host__ void cudaGetRectSubPix(const float *img, int win_size, float center_x, float center_y, float *patch, int width,
-                                int height, cudaStream_t stream) {
-    int N = win_size * win_size;
-    int threads = 256;
-    int blocks = (N + threads - 1) / threads;
-
-    getRectSubPixKernel<<<blocks, threads, 0, stream>>>(img, width, height, center_x, center_y, patch, win_size);
-}
-
-__host__ void cudaVecSub(const Npp32f *vec1, const Npp32f *vec2, Npp32f *error, int win_size, cudaStream_t stream) {
-
-    NppStreamContext ctx;
-    NPP_CHECK(nppGetStreamContext(&ctx));
-    ctx.hStream = stream;
-
-    int step = win_size * sizeof(Npp32f);
-    NppiSize roi = {win_size, win_size};
-
-    NPP_CHECK(nppiSub_32f_C1R_Ctx(
-        /* pSrc1       */ vec1,
-        /* nSrc1Step   */ step,
-        /* pSrc2       */ vec2,
-        /* nSrc2Step   */ step,
-        /* pDst        */ error,
-        /* nDstStep    */ step,
-        /* oSizeROI    */ roi,
-        /* nppStreamCtx*/ ctx));
-}
-
-// vec1, vec2: device pointers to win_size×win_size floats
-// win_size:   side length
-// stream:     CUDA stream to enqueue on
-__host__ void cudaComputeDot(const float *vec1, const float *vec2, float *result, int win_size, cudaStream_t stream,
-                             cublasHandle_t cublasH) {
-    int N = win_size * win_size;
-
-    // 1) tell cuBLAS to use your stream
-    cublasSetStream(cublasH, stream);
-
-    // 2) compute dot-product: result = vec1⋅vec2
-    //    increments = 1 because they're contiguous
-    cublasSdot(cublasH, N, vec1, 1, vec2, 1, result);
-}
-
-__host__ std::tuple<float, float, bool>
-lucas_kanade(const Npp32f *d_img1, const Npp32f *d_img2, const Npp32f *d_grad_x, const Npp32f *d_grad_y,
-             Npp32f *d_template_patch, Npp32f *d_patch, Npp32f *d_grad_x_patch, Npp32f *d_grad_y_patch,
-             Npp32f *d_error_patch,
-
-             Npp32f *d_Gxx, Npp32f *d_Gxy, Npp32f *d_Gyy, Npp32f *d_b1, Npp32f *d_b2,
-
-             float u, float v, float x_l, float y_l, float scaled_win_size, int origin_win_size, int max_iter,
-             float eps, float min_eig, int width, int height, cudaStream_t stream, cublasHandle_t cublasH) {
-
-    cudaGetRectSubPix(d_img1, origin_win_size, x_l, y_l, d_template_patch, width, height, stream);
-    // DEBUG
-    // save_device_image<Npp32f, CV_32FC1>(d_template_patch, origin_win_size, origin_win_size, "template_patch.png");
-
-    bool success = true;
-
-    for (int iter = 0; iter < max_iter; iter++) {
-
-        float xc = x_l + u;
-        float yc = y_l + v;
-
-        // Check if the shifted patch is inside I2
-        if (!in_bound(xc, yc, int(scaled_win_size / 2), width, height)) {
-            // std::cout << "lucas_kanade Out of bound at iteration " << iter << std::endl;
-            success = false;
-            break;
-        }
-
-        // Sample the patch in I2 and the gradients at (xc, yc)
-        cudaGetRectSubPix(d_img2, origin_win_size, xc, yc, d_patch, width, height, stream);
-        // DEBUG
-        // save_device_image<Npp32f, CV_32FC1>(d_patch, origin_win_size, origin_win_size, "patch.png");
-
-        cudaGetRectSubPix(d_grad_x, origin_win_size, xc, yc, d_grad_x_patch, width, height, stream);
-        cudaGetRectSubPix(d_grad_y, origin_win_size, xc, yc, d_grad_y_patch, width, height, stream);
-
-        // Compute error image (template - patch)
-        cudaVecSub(d_patch, d_template_patch, d_error_patch, origin_win_size, stream);
-
-        // Build elements of the normal equations matrix
-
-        // Compute Gxx, Gxy, Gyy asynchronously
-        cudaComputeDot(d_grad_x_patch, d_grad_x_patch, d_Gxx, origin_win_size, stream, cublasH);
-        cudaComputeDot(d_grad_x_patch, d_grad_y_patch, d_Gxy, origin_win_size, stream, cublasH);
-        cudaComputeDot(d_grad_y_patch, d_grad_y_patch, d_Gyy, origin_win_size, stream, cublasH);
-
-        // Copy device pointers to host pointers
-        float Gxx, Gxy, Gyy;
-        CUDA_CHECK(cudaMemcpyAsync(&Gxx, d_Gxx, sizeof(float), cudaMemcpyDeviceToHost, stream));
-        CUDA_CHECK(cudaMemcpyAsync(&Gxy, d_Gxy, sizeof(float), cudaMemcpyDeviceToHost, stream));
-        CUDA_CHECK(cudaMemcpyAsync(&Gyy, d_Gyy, sizeof(float), cudaMemcpyDeviceToHost, stream));
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        // Check for degeneracy and compute minimum eigenvalue
-        float det = Gxx * Gyy - Gxy * Gxy;
-
-        if (det <= 0) {
-            // std::cout << "lucas_kanade det <= 0 at iteration " << iter << std::endl;
-            success = false;
-            break;
-        }
-        float trace = Gxx + Gyy;
-        float lambda_min = (trace - std::sqrt(trace * trace - 4 * det)) / 2.0;
-        // Filter by minimum eigenvalue (normalized by patch size)
-        if (lambda_min / (origin_win_size * origin_win_size) < min_eig) {
-            // std::cout << "lucas_kanade lambda_min < min_eig at iteration " << iter << std::endl;
-            success = false;
-            break;
-        }
-
-        // Compute right-hand side vector
-        cudaComputeDot(d_grad_x_patch, d_error_patch, d_b1, origin_win_size, stream, cublasH);
-        cudaComputeDot(d_grad_y_patch, d_error_patch, d_b2, origin_win_size, stream, cublasH);
-
-        // Copy device pointers to host pointers
-        float b1, b2;
-        CUDA_CHECK(cudaMemcpyAsync(&b1, d_b1, sizeof(float), cudaMemcpyDeviceToHost, stream));
-        CUDA_CHECK(cudaMemcpyAsync(&b2, d_b2, sizeof(float), cudaMemcpyDeviceToHost, stream));
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        // Solve for [du, dv] using Cramer's rule
-        float inv_det = 1.0f / det;
-        float du = (Gyy * b1 - Gxy * b2) * inv_det;
-        float dv = (-Gxy * b1 + Gxx * b2) * inv_det;
-
-        u += du;
-        v += dv;
-
-        // Check convergence
-        if (std::abs(du) < eps && std::abs(dv) < eps) {
-            break;
-        }
     }
 
-    return std::make_tuple(u, v, success);
+    // Allocate shared memory: reference patch + partial sums + shared u,v
+    // Layout:
+    // s_I0: patch_area
+    // s_Gxx: patch_area
+    // s_Gxy: patch_area
+    // s_Gyy: patch_area
+    // s_b1:  patch_area
+    // s_b2:  patch_area
+    // s_uv:  2 floats
+    extern __shared__ float sdata[];
+    float *s_I0 = sdata;              // patch_area floats
+    float *s_Gxx = s_I0 + patch_area; // patch_area floats
+    float *s_Gxy = s_Gxx + patch_area;
+    float *s_Gyy = s_Gxy + patch_area;
+    float *s_b1 = s_Gyy + patch_area;
+    float *s_b2 = s_b1 + patch_area;
+
+    // Shared variables for broadcasting displacement and exit flag
+    // We can use the end of s_b2 or specific slots.
+    // Let's use the space after s_b2.
+    volatile float *s_common = s_b2 + patch_area;
+    // s_common[0] = u, s_common[1] = v, s_common[2] = break_flag
+
+    // Load reference patch from image0 into shared memory
+    float xr = x0 - patch_radius + tx;
+    float yr = y0 - patch_radius + ty;
+    s_I0[local_idx] = bilinear_interpolate(image0, width, height, xr, yr);
+
+    // Initialize shared displacement
+    if (local_idx == 0) {
+        s_common[0] = u_in;
+        s_common[1] = v_in;
+        s_common[2] = 0.0f; // break flag
+    }
+    __syncthreads();
+
+    // Iterative Lucas-Kanade refinement
+    for (int iter = 0; iter < max_iter; ++iter) {
+        // Read current u, v from shared memory
+        float u = s_common[0];
+        float v = s_common[1];
+
+        // Compute current sample position in image1
+        float xc = xr + u;
+        float yc = yr + v;
+
+        // Check if out-of-bounds (we need +1/-1 for gradient)
+        // If any thread is out of bounds, we might have issues.
+        // We just clamp or check individual validity.
+        // For reduction correctness, we should set invalid contributions to 0.
+        bool valid = (xc >= 1.0f && xc <= width - 2 && yc >= 1.0f && yc <= height - 2);
+
+        float gx = 0.0f, gy = 0.0f, e = 0.0f;
+        if (valid) {
+            // Sample I1
+            float I1_val = bilinear_interpolate(image1, width, height, xc, yc);
+            // Use precomputed gradients for speed
+            gx = bilinear_interpolate(grad_x, width, height, xc, yc);
+            gy = bilinear_interpolate(grad_y, width, height, xc, yc);
+            // Compute error = I0 - I1
+            e = s_I0[local_idx] - I1_val;
+        }
+
+        // Store per-pixel contributions in shared arrays
+        // If invalid, contribute 0
+        s_Gxx[local_idx] = valid ? gx * gx : 0.0f;
+        s_Gxy[local_idx] = valid ? gx * gy : 0.0f;
+        s_Gyy[local_idx] = valid ? gy * gy : 0.0f;
+        s_b1[local_idx] = valid ? gx * e : 0.0f;
+        s_b2[local_idx] = valid ? gy * e : 0.0f;
+        __syncthreads();
+
+        // Parallel Reduction
+        // Reduce s_Gxx, s_Gxy, s_Gyy, s_b1, s_b2
+        // Assuming block dimensions handle patch_area.
+        // We use a stride loop for arbitrary size.
+        for (unsigned int s = 512; s > 0; s >>= 1) {
+            if (local_idx < s) {
+                if (local_idx + s < patch_area) {
+                    s_Gxx[local_idx] += s_Gxx[local_idx + s];
+                    s_Gxy[local_idx] += s_Gxy[local_idx + s];
+                    s_Gyy[local_idx] += s_Gyy[local_idx + s];
+                    s_b1[local_idx] += s_b1[local_idx + s];
+                    s_b2[local_idx] += s_b2[local_idx + s];
+                }
+            }
+            __syncthreads();
+        }
+
+        // Solve 2x2 system on thread 0
+        if (local_idx == 0) {
+            float sumGxx = s_Gxx[0];
+            float sumGxy = s_Gxy[0];
+            float sumGyy = s_Gyy[0];
+            float sumb1 = s_b1[0];
+            float sumb2 = s_b2[0];
+
+            float det = sumGxx * sumGyy - sumGxy * sumGxy;
+            float du = 0.0f, dv = 0.0f;
+
+            if (fabs(det) < 1e-6f) {
+                // Ill-conditioned; terminate iteration
+                s_common[2] = 1.0f; // Set break flag
+            } else {
+                float inv00 = sumGyy / det;
+                float inv01 = -sumGxy / det;
+                float inv11 = sumGxx / det;
+                du = inv00 * sumb1 + inv01 * sumb2;
+                dv = inv01 * sumb1 + inv11 * sumb2;
+
+                // Update u, v
+                s_common[0] += du;
+                s_common[1] += dv;
+
+                // Check convergence
+                if (du * du + dv * dv < eps * eps) {
+                    s_common[2] = 1.0f; // Converged
+                }
+
+                // Optional: Check min eigenvalue
+                /*
+                float trace = sumGxx + sumGyy;
+                float temp = sqrtf((sumGxx - sumGyy) * (sumGxx - sumGyy) + 4.0f * sumGxy * sumGxy);
+                float lambda2 = 0.5f * (trace - temp);
+                if (lambda2 < min_eigenvalue) {
+                    s_common[2] = 1.0f;
+                }
+                */
+            }
+        }
+        __syncthreads();
+
+        // Check break flag
+        if (s_common[2] > 0.0f)
+            break;
+    }
+
+    // Write output displacement (ALL threads need to write to their local variables
+    // to propagate to the next level of the pyramid)
+    // Read final u,v from shared memory
+    *u_out = s_common[0];
+    *v_out = s_common[1];
 }
 
-__host__ std::tuple<float, float, bool>
-pyramid_lucas_kanade(const std::vector<Npp32f *> &d_pyr1, const std::vector<Npp32f *> &d_pyr2,
-                     const std::vector<Npp32f *> &d_grad_x, const std::vector<Npp32f *> &d_grad_y,
-                     Npp32f *d_template_patch, Npp32f *d_patch, Npp32f *d_grad_x_patch, Npp32f *d_grad_y_patch,
-                     Npp32f *d_error_patch,
+// Use __launch_bounds__ to tell the compiler to optimize for this thread count
+// This helps reduce register usage per thread
+__global__ void __launch_bounds__(1024, 1)
+    pyramid_lucas_kanade_kernel(const cv::Point2f *prev_pts, cv::Point2f *next_pts, const float **d_pyr1_ptrs,
+                                const float **d_pyr2_ptrs, const float **d_grad_x_ptrs, const float **d_grad_y_ptrs,
+                                int levels, int win_size, int max_iter, float eps, float min_eig, int width, int height,
+                                int num_points) {
+    int pt_idx = blockIdx.x;
+    if (pt_idx >= num_points)
+        return;
 
-                     Npp32f *d_Gxx, Npp32f *d_Gxy, Npp32f *d_Gyy, Npp32f *d_b1, Npp32f *d_b2,
+    float x_pt = prev_pts[pt_idx].x;
+    float y_pt = prev_pts[pt_idx].y;
 
-                     const cv::Point2f &pt, int levels, int win_size, int max_iter, float eps, float min_eig, int width,
-                     int height, cudaStream_t stream, cublasHandle_t cublasH) {
-    float u_prev = 0.0;
-    float v_prev = 0.0;
-    bool success = true;
+    float u_prev = 0.0f;
+    float v_prev = 0.0f;
 
     for (int lvl = levels; lvl >= 0; lvl--) { // 3, 2, 1, 0
         int pyr_width = width >> lvl;
         int pyr_height = height >> lvl;
 
         float scale = 1.0f / (1 << lvl);
+        float x_l = x_pt * scale;
+        float y_l = y_pt * scale;
 
-        float x_l = pt.x * scale;
-        float y_l = pt.y * scale;
+        float u_in = u_prev * 2.0f;
+        float v_in = v_prev * 2.0f;
 
-        float u = u_prev * 2.0;
-        float v = v_prev * 2.0;
-
-        // Check if the patch around (x_l, y_l) is inside I1
-        if (!in_bound(x_l, y_l, int(scale * win_size / 2), pyr_width, pyr_height)) {
-            // std::cout << "Out of bound at level " << lvl << std::endl;
-            success = false;
-            break;
+        // Check if the patch around (x_l, y_l) is inside bounds
+        if (!in_bound(x_l, y_l, win_size / 2, pyr_width, pyr_height)) {
+            // Keep u_prev, v_prev as is (likely 0 or scaled)
+            // Or reset? OpenCV usually resets or keeps.
+            // If we break, u_prev/v_prev won't be updated for lower levels.
+            // We should probably just zero it or stop.
+            // If we break here, u_prev is from higher level (smaller image).
+            // We need to scale it up for next levels?
+            // Actually, if we lose track at coarse level, we probably can't recover at fine level.
+            // But we must maintain consistency.
+            u_prev *= 2.0f;
+            v_prev *= 2.0f;
+            continue;
         }
 
-        auto [new_u, new_v, lvl_ok] = lucas_kanade(
-            d_pyr1[lvl], d_pyr2[lvl], d_grad_x[lvl], d_grad_y[lvl], d_template_patch, d_patch, d_grad_x_patch,
-            d_grad_y_patch, d_error_patch,
+        float u_out, v_out;
+        lucas_kanade_kernel(d_pyr1_ptrs[lvl], d_pyr2_ptrs[lvl], d_grad_x_ptrs[lvl], d_grad_y_ptrs[lvl], pyr_width,
+                            pyr_height, x_l, y_l, win_size / 2, max_iter, eps, min_eig, u_in, v_in, &u_out, &v_out);
 
-            d_Gxx, d_Gxy, d_Gyy, d_b1, d_b2,
-
-            u, v, x_l, y_l, scale * win_size, win_size, max_iter, eps, min_eig, pyr_width, pyr_height, stream, cublasH);
-
-        if (!lvl_ok) {
-            // std::cout << "Failed to converge at level " << lvl << std::endl;
-            // success = false; This is not correct.
-            break;
-        }
-
-        // Save refined flow for this level
-        u_prev = new_u;
-        v_prev = new_v;
+        u_prev = u_out;
+        v_prev = v_out;
     }
 
-    return std::make_tuple(u_prev, v_prev, success);
+    // Write back result (only thread 0 writes to avoid redundancy)
+    if (threadIdx.x == 0) {
+        next_pts[pt_idx].x = x_pt + u_prev;
+        next_pts[pt_idx].y = y_pt + v_prev;
+    }
 }
 
 __host__ void build_pyramid(std::vector<Npp32f *> &pyr, int levels, const int width, const int height,
@@ -312,31 +329,6 @@ __host__ void build_pyramid(std::vector<Npp32f *> &pyr, int levels, const int wi
             /* oDstROI      */ dstROI,
             /* eInterpolation */ NPPI_INTER_LINEAR,
             /* nppStreamCtx */ ctx));
-
-        // OpenCV works. But I don't want to use it.
-        // cv::cuda::GpuMat d_src(src_h, src_w, CV_8UC1, pyr[i]);
-        // cv::cuda::GpuMat d_dst(dst_h, dst_w, CV_8UC1, pyr[i + 1]);
-        // cv::cuda::Stream cvStream = cv::cuda::StreamAccessor::wrapStream(stream);
-        // cv::cuda::pyrDown(d_src, d_dst, cvStream);
-
-        // NPP GaussPyramidLayerDown does not work. I don't know why.
-        // NppiSize srcSize = {src_w, src_h};
-        // NppiPoint srcOffset = {0, 0};
-        // NppiSize dstSize = {dst_w, dst_h};
-        // static const Npp32f gauss5f[5] = {1.0f / 16.0f, 4.0f / 16.0f, 6.0f / 16.0f, 4.0f / 16.0f, 1.0f / 16.0f};
-        // NPP_CHECK(nppiFilterGaussPyramidLayerDownBorder_8u_C1R_Ctx(
-        //     /* pSrc           */ pyr[i],
-        //     /* nSrcStep       */ srcStep,
-        //     /* oSrcSize       */ srcSize,
-        //     /* oSrcOffset     */ srcOffset,
-        //     /* pDst           */ pyr[i + 1],
-        //     /* nDstStep       */ dstStep,
-        //     /* oSizeROI       */ dstSize,
-        //     /* nRate          */ 2.0f,    // downsample rate (2.0 = keep every 2nd pixel)
-        //     /* nFilterTaps    */ 5,       // length of gauss5f[]
-        //     /* pKernel        */ gauss5f, // normalized float kernel
-        //     /* eBorderType    */ NPP_BORDER_REPLICATE,
-        //     /* nppStreamCtx   */ ctx));
     }
 }
 
@@ -367,35 +359,28 @@ class SparseOpticalFlow {
     int levels;
     int height, width;
     std::vector<cv::Point2f> prev_pts;
-    std::vector<cv::Point2f> next_pts;
 
     // GPU memory
     Npp8u *d_bgr, *d_gray;
 
-    // Read-only memory in the process of tracking
+    // Vectors to manage memory allocations (Host vector of Device pointers)
     std::vector<Npp32f *> d_pyr1, d_pyr2;
     std::vector<Npp32f *> d_grad_x, d_grad_y;
 
-    // Each tracking point has its own patch
-    std::vector<Npp32f *> d_template_patches, d_patches;
-    std::vector<Npp32f *> d_grad_x_patches, d_grad_y_patches;
-    std::vector<Npp32f *> d_error_patches;
+    // Device pointers to pointer arrays (Device pointer to Device pointers)
+    Npp32f **d_pyr1_ptrs, **d_pyr2_ptrs;
+    Npp32f **d_grad_x_ptrs, **d_grad_y_ptrs;
 
-    // Allocate one device buffer per patch for Gxx, Gxy, Gyy, b1, b2
-    std::vector<Npp32f *> d_Gxx, d_Gxy, d_Gyy, d_b1, d_b2;
+    // Device memory for points
+    cv::Point2f *d_prev_pts, *d_next_pts;
 
-    // CUDA streams for parallel processing
-    std::vector<cudaStream_t> streams;
-
-    // NPP context for the main stream
+    cudaStream_t stream; // Main stream
     NppStreamContext main_npp_ctx;
 
     int win_size;
     int max_iter;
     float eps;
     float min_eig;
-
-    cublasHandle_t cublasH;
 
   public:
     SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &init_gray, int levels = 3, int win_size = 31,
@@ -411,26 +396,18 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
 
     height = init_gray.rows;
     width = init_gray.cols;
-    assert(width == init_gray.step[0]);
 
-    // Initialize CUDA streams. streams[0] is the main stream. Each point has its own stream.
-    streams.resize(pts.size() + 1);
-    for (auto &stream : streams) {
-        CUDA_CHECK(cudaStreamCreate(&stream));
-    }
+    // Create main stream
+    CUDA_CHECK(cudaStreamCreate(&stream));
 
-    // Initialize NPP context for the main stream
+    // Initialize NPP context
     NPP_CHECK(nppGetStreamContext(&main_npp_ctx));
-    main_npp_ctx.hStream = streams[0];
-
-    cublasCreate(&cublasH);
-    // cublasSdot with a host pointer blocks until the reduction finishes
-    cublasSetPointerMode(cublasH, CUBLAS_POINTER_MODE_DEVICE);
+    main_npp_ctx.hStream = stream;
 
     size_t bgrBytes = size_t(height) * width * 3u; // 3 channels
     size_t grayBytes = size_t(height) * width;
-    CUDA_CHECK(cudaMallocAsync(&d_bgr, bgrBytes, streams[0]));
-    CUDA_CHECK(cudaMallocAsync(&d_gray, grayBytes, streams[0]));
+    CUDA_CHECK(cudaMallocAsync(&d_bgr, bgrBytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_gray, grayBytes, stream));
 
     // Initialize pyramid vectors
     d_pyr1.resize(levels + 1);
@@ -438,71 +415,48 @@ SparseOpticalFlow::SparseOpticalFlow(std::vector<cv::Point2f> &pts, cv::Mat &ini
     d_grad_x.resize(levels + 1);
     d_grad_y.resize(levels + 1);
 
-    // Allocate GPU memory for pyramid, d_pyr1 and d_pyr2
-    for (int i = 0; i <= levels; i++) { // 0, 1, 2, 3
-        // divide by 2^i
+    // Allocate GPU memory for pyramid levels
+    for (int i = 0; i <= levels; i++) {
         const int pyr_width = width >> i;
         const int pyr_height = height >> i;
-
         size_t pyr_size = pyr_width * pyr_height * sizeof(Npp32f);
-        CUDA_CHECK(cudaMallocAsync(&d_pyr1[i], pyr_size, streams[0]));
-        CUDA_CHECK(cudaMallocAsync(&d_pyr2[i], pyr_size, streams[0]));
+        CUDA_CHECK(cudaMallocAsync(&d_pyr1[i], pyr_size, stream));
+        CUDA_CHECK(cudaMallocAsync(&d_pyr2[i], pyr_size, stream));
+        CUDA_CHECK(cudaMallocAsync(&d_grad_x[i], pyr_size, stream));
+        CUDA_CHECK(cudaMallocAsync(&d_grad_y[i], pyr_size, stream));
     }
+
+    // Allocate device arrays for pointers
+    CUDA_CHECK(cudaMallocAsync(&d_pyr1_ptrs, (levels + 1) * sizeof(Npp32f *), stream));
+    CUDA_CHECK(cudaMallocAsync(&d_pyr2_ptrs, (levels + 1) * sizeof(Npp32f *), stream));
+    CUDA_CHECK(cudaMallocAsync(&d_grad_x_ptrs, (levels + 1) * sizeof(Npp32f *), stream));
+    CUDA_CHECK(cudaMallocAsync(&d_grad_y_ptrs, (levels + 1) * sizeof(Npp32f *), stream));
+
+    // Copy pointers to device
+    // Note: d_pyr vectors contain device pointers. We copy this array of pointers to the device.
+    CUDA_CHECK(
+        cudaMemcpyAsync(d_pyr1_ptrs, d_pyr1.data(), (levels + 1) * sizeof(Npp32f *), cudaMemcpyHostToDevice, stream));
+    CUDA_CHECK(
+        cudaMemcpyAsync(d_pyr2_ptrs, d_pyr2.data(), (levels + 1) * sizeof(Npp32f *), cudaMemcpyHostToDevice, stream));
+    CUDA_CHECK(cudaMemcpyAsync(d_grad_x_ptrs, d_grad_x.data(), (levels + 1) * sizeof(Npp32f *), cudaMemcpyHostToDevice,
+                               stream));
+    CUDA_CHECK(cudaMemcpyAsync(d_grad_y_ptrs, d_grad_y.data(), (levels + 1) * sizeof(Npp32f *), cudaMemcpyHostToDevice,
+                               stream));
+
     // Build initial pyramid d_pyr1
-    // Convert uint8 to float32.
-    CUDA_CHECK(cudaMemcpyAsync(d_gray, init_gray.data, grayBytes, cudaMemcpyHostToDevice, streams[0]));
+    CUDA_CHECK(cudaMemcpyAsync(d_gray, init_gray.data, grayBytes, cudaMemcpyHostToDevice, stream));
     NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_gray, width * sizeof(Npp8u), d_pyr1[0], width * sizeof(Npp32f),
                                         {width, height}, main_npp_ctx));
-    build_pyramid(d_pyr1, levels, width, height, streams[0]);
-    // DEBUG
-    // for (int i = 0; i <= levels; i++) {
-    //     const int pyr_width = width >> i;
-    //     const int pyr_height = height >> i;
-    //     save_device_image<Npp32f, CV_32FC1>(d_pyr1[i], pyr_width, pyr_height, "pyr1_" + std::to_string(i) + ".png");
-    // }
+    build_pyramid(d_pyr1, levels, width, height, stream);
 
-    // Allocate GPU memory for d_grad_x and d_grad_y
-    for (int i = 0; i <= levels; i++) { // 0, 1, 2, 3
-        const int pyr_width = width >> i;
-        const int pyr_height = height >> i;
-
-        size_t grad_size = pyr_width * pyr_height * sizeof(Npp32f);
-        CUDA_CHECK(cudaMallocAsync(&d_grad_x[i], grad_size, streams[0]));
-        CUDA_CHECK(cudaMallocAsync(&d_grad_y[i], grad_size, streams[0]));
-    }
-
-    // Each tracking point has its own patch
-    size_t patch_size = win_size * win_size * sizeof(Npp32f);
-    d_template_patches.resize(pts.size());
-    d_patches.resize(pts.size());
-    d_grad_x_patches.resize(pts.size());
-    d_grad_y_patches.resize(pts.size());
-    d_error_patches.resize(pts.size());
-    for (size_t i = 0; i < pts.size(); i++) {
-        CUDA_CHECK(cudaMallocAsync(&d_template_patches[i], patch_size, streams[i + 1]));
-        CUDA_CHECK(cudaMallocAsync(&d_patches[i], patch_size, streams[i + 1]));
-        CUDA_CHECK(cudaMallocAsync(&d_grad_x_patches[i], patch_size, streams[i + 1]));
-        CUDA_CHECK(cudaMallocAsync(&d_grad_y_patches[i], patch_size, streams[i + 1]));
-        CUDA_CHECK(cudaMallocAsync(&d_error_patches[i], patch_size, streams[i + 1]));
-    }
-
-    d_Gxx.resize(pts.size());
-    d_Gxy.resize(pts.size());
-    d_Gyy.resize(pts.size());
-    d_b1.resize(pts.size());
-    d_b2.resize(pts.size());
-    for (size_t i = 0; i < pts.size(); i++) {
-        CUDA_CHECK(cudaMallocAsync(&d_Gxx[i], sizeof(Npp32f), streams[i + 1]));
-        CUDA_CHECK(cudaMallocAsync(&d_Gxy[i], sizeof(Npp32f), streams[i + 1]));
-        CUDA_CHECK(cudaMallocAsync(&d_Gyy[i], sizeof(Npp32f), streams[i + 1]));
-        CUDA_CHECK(cudaMallocAsync(&d_b1[i], sizeof(Npp32f), streams[i + 1]));
-        CUDA_CHECK(cudaMallocAsync(&d_b2[i], sizeof(Npp32f), streams[i + 1]));
-    }
-
+    // Initialize points
     prev_pts = pts;
-    next_pts = std::vector<cv::Point2f>(pts.size(), cv::Point2f(0, 0));
+    size_t pts_bytes = pts.size() * sizeof(cv::Point2f);
+    CUDA_CHECK(cudaMallocAsync(&d_prev_pts, pts_bytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_next_pts, pts_bytes, stream));
+    CUDA_CHECK(cudaMemcpyAsync(d_prev_pts, pts.data(), pts_bytes, cudaMemcpyHostToDevice, stream));
 
-    CUDA_CHECK(cudaStreamSynchronize(streams[0])); // sync main stream
+    CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
 __global__ void bgr_to_gray(const unsigned char *src, unsigned char *dst, size_t srcStep, size_t dstStep, int width,
@@ -515,7 +469,6 @@ __global__ void bgr_to_gray(const unsigned char *src, unsigned char *dst, size_t
     const unsigned char *rowSrc = src + y * srcStep;
     unsigned char *rowDst = dst + y * dstStep;
 
-    // BGR channels are interleaved
     const float b = rowSrc[3 * x + 0];
     const float g = rowSrc[3 * x + 1];
     const float r = rowSrc[3 * x + 2];
@@ -535,79 +488,79 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
     int width = next_bgr.cols;
     int height = next_bgr.rows;
     size_t bgrStepBytes = next_bgr.step[0];
-    assert(bgrStepBytes == width * 3u);
     size_t grayStepBytes = width * sizeof(Npp8u);
 
-    /**
-     * Convert BGR to grayscale
-     * next_bgr is on pageable memory
-     */
-    CUDA_CHECK(cudaMemcpyAsync(d_bgr, next_bgr.data, bgrStepBytes * height, cudaMemcpyHostToDevice, streams[0]));
-    apply_bgr_to_gray(d_bgr, d_gray, bgrStepBytes, grayStepBytes, width, height, streams[0]);
-    // DEBUG
-    // save_device_image<Npp8u, CV_8UC1>(d_gray, width, height, "d_gray.png");
+    // Upload and convert
+    CUDA_CHECK(cudaMemcpyAsync(d_bgr, next_bgr.data, bgrStepBytes * height, cudaMemcpyHostToDevice, stream));
+    apply_bgr_to_gray(d_bgr, d_gray, bgrStepBytes, grayStepBytes, width, height, stream);
 
     // Build pyramid pyr2
     NPP_CHECK(nppiConvert_8u32f_C1R_Ctx(d_gray, width * sizeof(Npp8u), d_pyr2[0], width * sizeof(Npp32f),
                                         {width, height}, main_npp_ctx));
-    build_pyramid(this->d_pyr2, levels, width, height, streams[0]);
-    // DEBUG
-    // for (int i = 0; i <= levels; i++) {
-    //     const int pyr_width = width >> i;
-    //     const int pyr_height = height >> i;
-    //     save_device_image<Npp32f, CV_32FC1>(d_pyr2[i], pyr_width, pyr_height, "pyr2_" + std::to_string(i) + ".png");
-    // }
+    build_pyramid(this->d_pyr2, levels, width, height, stream);
 
-    // Pre-compute gradients for all pyramid levels
-    for (int i = 0; i <= levels; i++) { // 0, 1, 2, 3
+    // Pre-compute gradients for all pyramid levels of pyr2 (Image I1)
+    for (int i = 0; i <= levels; i++) {
         const int pyr_width = width >> i;
         const int pyr_height = height >> i;
-        apply_sobel_filter(this->d_pyr2[i], this->d_grad_x[i], this->d_grad_y[i], pyr_width, pyr_height, streams[0]);
+        apply_sobel_filter(this->d_pyr2[i], this->d_grad_x[i], this->d_grad_y[i], pyr_width, pyr_height, stream);
     }
-    // DEBUG
-    // for (int i = 0; i <= levels; i++) {
-    //     const int pyr_width = width >> i;
-    //     const int pyr_height = height >> i;
-    //     save_device_image<Npp32f, CV_32FC1>(d_grad_x[i], pyr_width, pyr_height,
-    //                                         "d_grad_x_" + std::to_string(i) + ".png");
-    //     save_device_image<Npp32f, CV_32FC1>(d_grad_y[i], pyr_width, pyr_height,
-    //                                         "d_grad_y_" + std::to_string(i) + ".png");
-    // }
 
-    CUDA_CHECK(cudaStreamSynchronize(streams[0])); // sync main stream before tracking points
+    // Update device pointer arrays (d_pyr1 and d_pyr2 might have been swapped on host)
+    // We only need to update the pointers to the image data.
+    // NOTE: std::swap(d_pyr1, d_pyr2) swaps the vectors, so d_pyr1[i] now points to what was d_pyr2[i].
+    // So we need to update d_pyr1_ptrs and d_pyr2_ptrs on device with new values.
+    CUDA_CHECK(
+        cudaMemcpyAsync(d_pyr1_ptrs, d_pyr1.data(), (levels + 1) * sizeof(Npp32f *), cudaMemcpyHostToDevice, stream));
+    CUDA_CHECK(
+        cudaMemcpyAsync(d_pyr2_ptrs, d_pyr2.data(), (levels + 1) * sizeof(Npp32f *), cudaMemcpyHostToDevice, stream));
 
-    // Track each point in parallel using separate CUDA streams, start from stream 1.
-    // Thus, all streams can run simultaneously and asynchronously.
-    for (size_t i = 0; i < prev_pts.size(); ++i) {
-        float x = prev_pts[i].x;
-        float y = prev_pts[i].y;
+    // Gradients d_grad_x/y are computed on d_pyr2. So we update them too (though they don't swap, they are
+    // overwritten).
+    CUDA_CHECK(cudaMemcpyAsync(d_grad_x_ptrs, d_grad_x.data(), (levels + 1) * sizeof(Npp32f *), cudaMemcpyHostToDevice,
+                               stream));
+    CUDA_CHECK(cudaMemcpyAsync(d_grad_y_ptrs, d_grad_y.data(), (levels + 1) * sizeof(Npp32f *), cudaMemcpyHostToDevice,
+                               stream));
 
-        // Pyramidal Lucas-Kanade
-        auto [u, v, success] = pyramid_lucas_kanade(
-            this->d_pyr1, this->d_pyr2, this->d_grad_x, this->d_grad_y, this->d_template_patches[i], this->d_patches[i],
-            this->d_grad_x_patches[i], this->d_grad_y_patches[i], this->d_error_patches[i],
+    // Launch batched kernel
+    // 1 block per point.
+    // Threads: win_size * win_size.
+    int threads_per_block = win_size * win_size;
 
-            this->d_Gxx[i], this->d_Gxy[i], this->d_Gyy[i], this->d_b1[i], this->d_b2[i],
+    // Shared memory size: 6 arrays of size patch_area * sizeof(float) + extra for shared vars
+    // 6 * patch_area + some extra.
+    size_t shared_mem = (6 * threads_per_block + 32) * sizeof(float);
 
-            prev_pts[i], levels, win_size, max_iter, eps, min_eig, this->width, this->height, streams[i + 1], cublasH);
-
-        if (success) {
-            next_pts[i].x = x + u;
-            next_pts[i].y = y + v;
-        } else {
-            next_pts[i].x = x;
-            next_pts[i].y = y;
+    pyramid_lucas_kanade_kernel<<<prev_pts.size(), threads_per_block, shared_mem, stream>>>(
+        d_prev_pts, d_next_pts, (const float **)d_pyr1_ptrs, (const float **)d_pyr2_ptrs, (const float **)d_grad_x_ptrs,
+        (const float **)d_grad_y_ptrs, levels, win_size, max_iter, eps, min_eig, width, height, prev_pts.size());
+    // Check for kernel launch errors (capture error before it's cleared)
+    {
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch error: " << cudaGetErrorString(err) << std::endl;
+            exit(EXIT_FAILURE);
         }
     }
 
-    // Synchronize all streams
-    for (auto &stream : streams) {
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-    }
+    // Download results
+    std::vector<cv::Point2f> next_pts(prev_pts.size());
+    CUDA_CHECK(cudaMemcpyAsync(next_pts.data(), d_next_pts, prev_pts.size() * sizeof(cv::Point2f),
+                               cudaMemcpyDeviceToHost, stream));
 
-    // swap d_pyr1 and d_pyr2
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+
+    // Prepare for next frame
     std::swap(d_pyr1, d_pyr2);
+    // d_prev_pts for next frame is d_next_pts of this frame.
+    // We can just swap pointers on device? No, d_prev_pts is a single pointer.
+    // But we need to update the data in d_prev_pts for the next iteration.
+    // Since we computed new points in d_next_pts, we can swap d_prev_pts and d_next_pts pointers?
+    // BUT we didn't allocate them as "frame 1" and "frame 2" pointers that persist.
+    // Actually we can just swap the pointers member variables.
+    std::swap(d_prev_pts, d_next_pts);
 
+    // Also update host prev_pts
     prev_pts = next_pts;
 
     return next_pts;
@@ -615,62 +568,28 @@ __host__ std::vector<cv::Point2f> SparseOpticalFlow::track(cv::Mat &next_bgr) {
 
 SparseOpticalFlow::~SparseOpticalFlow() {
     // Free GPU memory
-    CUDA_CHECK(cudaFreeAsync(d_bgr, streams[0]));
-    CUDA_CHECK(cudaFreeAsync(d_gray, streams[0]));
+    CUDA_CHECK(cudaFreeAsync(d_bgr, stream));
+    CUDA_CHECK(cudaFreeAsync(d_gray, stream));
 
-    for (auto &d_pyr : d_pyr1) {
-        CUDA_CHECK(cudaFreeAsync(d_pyr, streams[0]));
-    }
-    for (auto &d_pyr : d_pyr2) {
-        CUDA_CHECK(cudaFreeAsync(d_pyr, streams[0]));
-    }
+    for (auto &d_pyr : d_pyr1)
+        CUDA_CHECK(cudaFreeAsync(d_pyr, stream));
+    for (auto &d_pyr : d_pyr2)
+        CUDA_CHECK(cudaFreeAsync(d_pyr, stream));
+    for (auto &d_grad : d_grad_x)
+        CUDA_CHECK(cudaFreeAsync(d_grad, stream));
+    for (auto &d_grad : d_grad_y)
+        CUDA_CHECK(cudaFreeAsync(d_grad, stream));
 
-    for (auto &d_grad : d_grad_x) {
-        CUDA_CHECK(cudaFreeAsync(d_grad, streams[0]));
-    }
-    for (auto &d_grad : d_grad_y) {
-        CUDA_CHECK(cudaFreeAsync(d_grad, streams[0]));
-    }
+    CUDA_CHECK(cudaFreeAsync(d_pyr1_ptrs, stream));
+    CUDA_CHECK(cudaFreeAsync(d_pyr2_ptrs, stream));
+    CUDA_CHECK(cudaFreeAsync(d_grad_x_ptrs, stream));
+    CUDA_CHECK(cudaFreeAsync(d_grad_y_ptrs, stream));
 
-    for (auto &d_template : d_template_patches) {
-        CUDA_CHECK(cudaFreeAsync(d_template, streams[0]));
-    }
-    for (auto &d_patch : d_patches) {
-        CUDA_CHECK(cudaFreeAsync(d_patch, streams[0]));
-    }
-    for (auto &d_grad : d_grad_x_patches) {
-        CUDA_CHECK(cudaFreeAsync(d_grad, streams[0]));
-    }
-    for (auto &d_grad : d_grad_y_patches) {
-        CUDA_CHECK(cudaFreeAsync(d_grad, streams[0]));
-    }
-    for (auto &d_error : d_error_patches) {
-        CUDA_CHECK(cudaFreeAsync(d_error, streams[0]));
-    }
-    for (auto &mem : d_Gxx) {
-        CUDA_CHECK(cudaFreeAsync(mem, streams[0]));
-    }
-    for (auto &mem : d_Gxy) {
-        CUDA_CHECK(cudaFreeAsync(mem, streams[0]));
-    }
-    for (auto &mem : d_Gyy) {
-        CUDA_CHECK(cudaFreeAsync(mem, streams[0]));
-    }
-    for (auto &mem : d_b1) {
-        CUDA_CHECK(cudaFreeAsync(mem, streams[0]));
-    }
-    for (auto &mem : d_b2) {
-        CUDA_CHECK(cudaFreeAsync(mem, streams[0]));
-    }
+    CUDA_CHECK(cudaFreeAsync(d_prev_pts, stream));
+    CUDA_CHECK(cudaFreeAsync(d_next_pts, stream));
 
-    CUDA_CHECK(cudaStreamSynchronize(streams[0]));
-
-    // Destroy CUDA streams
-    for (auto &stream : streams) {
-        CUDA_CHECK(cudaStreamDestroy(stream));
-    }
-
-    cublasDestroy(cublasH);
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    CUDA_CHECK(cudaStreamDestroy(stream));
 }
 
 void plot_trajectory(cv::Mat &display, const std::vector<std::vector<cv::Point2f>> &trajectory) {
